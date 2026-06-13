@@ -1,0 +1,855 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["multiSchema"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  schemas  = ["public", "tenant"]
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PUBLIC SCHEMA — global identity & cross-tenant tables
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum Role {
+  DEVELOPER
+  SUPER_ADMIN
+  SCHOOL_ADMIN
+  SCHOOL_STAFF
+  TEACHER
+  STUDENT
+  PARENT
+  USER
+
+  @@schema("public")
+}
+
+enum SchoolType {
+  bangla_medium
+  english_medium
+  madrasa
+  college
+  university_college
+
+  @@schema("public")
+}
+
+enum PlanBillingCycle {
+  monthly
+  quarterly
+  semi_annual
+  annual
+  lifetime
+  custom
+
+  @@schema("public")
+}
+
+enum SubscriptionStatus {
+  trial
+  active
+  past_due
+  // payment failed but grace period not expired
+  suspended
+  // grace period expired, school locked out
+  cancelled
+  expired
+
+  @@schema("public")
+}
+
+/// How a discount value is expressed: a % off or a flat BDT amount
+enum DiscountValueType {
+  percentage
+  // e.g. 20 means 20% off the bill
+  fixed_amount
+  // e.g. 500 means BDT 500 deducted from the bill
+
+  @@schema("public")
+}
+
+/// Who or what triggered the discount
+enum DiscountAdjustmentType {
+  voucher
+  // school applied a voucher code (or admin applied it on school's behalf)
+  manual
+  // super admin applied a direct adjustment without a voucher code
+  // e.g. compensation for downtime, loyalty reward, NGO deal
+
+  @@schema("public")
+}
+
+/// Global user login table. One row per (person × school).
+/// Three login identifier paths:
+///   A) phone/email  → parents, teachers, admins, staff
+///   B) studentCode  → students (unique per school, never clashes between siblings)
+/// globalPersonId links the same physical person across multiple school rows
+/// (transfers, re-admissions). Generated once on first registration.
+///
+/// CHECK constraint (not expressible in Prisma) — add via raw migration:
+///   ALTER TABLE public.users ADD CONSTRAINT must_have_identifier
+///   CHECK (phone IS NOT NULL OR email IS NOT NULL OR student_code IS NOT NULL);
+model User {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email       String?   @db.VarChar(255)
+  phone       String?   @db.VarChar(20)
+  studentCode String?   @map("student_code") @db.VarChar(30)
+  password    String    @db.VarChar(255)
+  schemaName  String    @map("schema_name") @db.VarChar(63)
+  role        Role
+  isActive    Boolean   @default(true) @map("is_active")
+  lastLogin   DateTime? @map("last_login") @db.Timestamptz
+
+  // OTP / session
+  resetOtp           String?   @map("reset_otp") @db.VarChar(10)
+  resetOtpExpires    DateTime? @map("reset_otp_expires") @db.Timestamptz
+  hashedRefreshToken String?   @map("hashed_refresh_token") @db.VarChar(255)
+
+  // Cross-school identity link — same UUID carried to every school this person joins
+  globalPersonId String? @map("global_person_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  // ── Soft delete ────────────────────────────────────────────
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz
+  // null = active; non-null = soft-deleted. Query always filter WHERE deleted_at IS NULL
+  deletedBy String?   @map("deleted_by") @db.Uuid
+  // which super admin / admin performed the soft-delete
+
+  permissions         UserPermission[]
+  profile             UserProfile?
+  administeredSchools School[]
+
+  // ── Uniqueness ──────────────────────────────────────────────
+  // IMPORTANT: Full @@unique constraints are intentionally NOT used here.
+  // Instead, partial unique indexes (WHERE deleted_at IS NULL) are created via
+  // raw SQL migration. This allows re-registration of a soft-deleted user with
+  // the same email/phone/studentCode without a constraint violation.
+  // See migration: add_partial_unique_indexes_for_soft_delete.sql
+  @@index([phone, schemaName])
+  @@index([email, schemaName])
+  @@index([studentCode, schemaName])
+  // Indexes for faster lookups
+  @@index([globalPersonId])
+  @@index([schemaName])
+  @@index([role])
+  @@index([isActive])
+  @@index([deletedAt])
+  @@map("users")
+  @@schema("public")
+}
+
+model UserProfile {
+  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId             String    @unique @map("user_id") @db.Uuid
+  firstName          String    @map("first_name") @db.VarChar(255)
+  lastName           String    @map("last_name") @db.VarChar(255)
+  gender             String?   @db.VarChar(50)
+  dob                DateTime? @db.Timestamptz
+  bloodGroup         String?   @map("blood_group") @db.VarChar(10)
+  religion           String?   @db.VarChar(50)
+  nationality        String?   @db.VarChar(100)
+  nidNo              String?   @map("nid_no") @db.VarChar(50)
+  birthCertificateNo String?   @map("brith_certificate_no") @db.VarChar(50)
+  phone              String?   @db.VarChar(20)
+  photoUrl           String?   @map("photo_url") @db.VarChar(500)
+
+  presentDivisionId  Int?    @map("present_division_id")
+  presentDistrictId  Int?    @map("present_district_id")
+  presentUpazilaId   Int?    @map("present_upazila_id")
+  presentUnionId     Int?    @map("present_union_id")
+  presentAddress     String? @map("present_address") @db.Text
+  presentFullAddress String? @map("present_full_address") @db.Text
+
+  permanentDivisionId  Int?    @map("permanent_division_id")
+  permanentDistrictId  Int?    @map("permanent_district_id")
+  permanentUpazilaId   Int?    @map("permanent_upazila_id")
+  permanentUnionId     Int?    @map("permanent_union_id")
+  permanentAddress     String? @map("permanent_address") @db.Text
+  permanentFullAddress String? @map("permanent_full_address") @db.Text
+
+  emergencyContactName     String? @map("emergency_contact_name") @db.VarChar(255)
+  emergencyContactPhone    String? @map("emergency_contact_phone") @db.VarChar(20)
+  emergencyContactRelation String? @map("emergenct_contact_relation") @db.VarChar(100)
+
+  metadata  Json?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  // ── Soft delete ────────────────────────────────────────────
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz
+  deletedBy String?   @map("deleted_by") @db.Uuid
+
+  user User @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  presentDivision Division? @relation("UserProfilePresentDivision", fields: [presentDivisionId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  presentDistrict District? @relation("UserProfilePresentDistrict", fields: [presentDistrictId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  presentUpazila  Upazila?  @relation("UserProfilePresentUpazila", fields: [presentUpazilaId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  presentUnion    Union?    @relation("UserProfilePresentUnion", fields: [presentUnionId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  permanentDivision Division? @relation("UserProfilePermanentDivision", fields: [permanentDivisionId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  permanentDistrict District? @relation("UserProfilePermanentDistrict", fields: [permanentDistrictId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  permanentUpazila  Upazila?  @relation("UserProfilePermanentUpazila", fields: [permanentUpazilaId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  permanentUnion    Union?    @relation("UserProfilePermanentUnion", fields: [permanentUnionId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([phone])
+  @@index([deletedAt])
+  @@map("user_profiles")
+  @@schema("public")
+}
+
+model Permission {
+  id             Int      @id @default(autoincrement())
+  permissionName String   @map("permission_name") @db.VarChar(255)
+  groupName      String   @map("group_name") @db.VarChar(100)
+  permissionKey  String   @unique @map("permission_key") @db.VarChar(100)
+  moduleName     String[] @map("module_name") // PostgreSQL scalar list
+
+  users UserPermission[]
+
+  // Index for filtering permissions by group
+  @@index([groupName])
+  @@map("permissions")
+  @@schema("public")
+}
+
+model UserPermission {
+  id           Int    @id @default(autoincrement())
+  userId       String @map("user_id") @db.Uuid
+  permissionId Int    @map("permission_id")
+
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, permissionId])
+  // Independent indexes for fast joins
+  @@index([userId])
+  @@index([permissionId])
+  @@map("user_permissions")
+  @@schema("public")
+}
+
+model School {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  // ── Basic identity ─────────────────────────────────────────
+  schoolName String     @map("school_name") @db.VarChar(255)
+  schoolSlug String     @unique @map("school_slug") @db.VarChar(63)
+  schoolType SchoolType @map("school_type")
+  // bangla_medium | english_medium | madrasa | college | university_college
+
+  schoolNameBn String? @map("school_name_bn") @db.VarChar(255)
+  // Bengali name — needed for Bengali report cards, certificates, official documents
+
+  // ── Location ───────────────────────────────────────────────
+  divisionId Int      @map("division_id")
+  districtId Int      @map("district_id")
+  upazilaId  Int?     @map("upazila_id")
+  postCode   String?  @map("post_code") @db.VarChar(10)
+  // thana is more specific than upazila — many BD schools use thana for address
+  address    String?  @db.Text
+  latitude   Decimal? @db.Decimal(10, 7)
+  longitude  Decimal? @db.Decimal(10, 7)
+
+  division Division @relation(fields: [divisionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  district District @relation(fields: [districtId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  upazila  Upazila? @relation(fields: [upazilaId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  // ── Contact ────────────────────────────────────────────────
+  contactEmail   String  @map("contact_email") @db.VarChar(255)
+  contactPhone   String  @map("contact_phone") @db.VarChar(20)
+  alternatePhone String? @map("alternate_phone") @db.VarChar(20)
+  // schools almost always have a second number (office landline)
+  website        String? @db.VarChar(255)
+  // needed for school profile page and public portal
+
+  // ── Official information ────────────────────────────────────
+  eiin            String? @unique @db.VarChar(20)
+  // EIIN is a unique govt identifier — unique constraint added
+  // nullable because private schools not always have EIIN
+  registrationNo  String? @map("registration_no") @db.VarChar(100)
+  mpoStatus       Boolean @default(false) @map("mpo_status")
+  // MPO = Monthly Payment Order (govt-aided salary) — critical for BD schools
+  banbeis         String? @map("banbeis_code") @db.VarChar(30)
+  // BANBEIS = Bangladesh Bureau of Educational Information and Statistics code
+  establishedYear Int?    @map("established_year")
+  // useful for school profile and reports
+
+  // ── Government & Regulatory ────────────────────────────────
+  governingBodyType String? @map("governing_body_type") @db.VarChar(50)
+  // school_managing_committee | board_of_governors | trust | govt_managed
+  // SMC (School Managing Committee) is a legal requirement for non-govt schools
+  recognitionStatus String? @map("recognition_status") @db.VarChar(30)
+  // recognized | un-recognized | provisionally_recognized
+  // DfE/DSHE recognition status affects eligibility for govt grants
+  recognizedBy      String? @map("recognized_by") @db.VarChar(100)
+  // DPE | DSHE | NCTB | University | Madrasa Board etc.
+  affiliationBoard  String? @map("affiliation_board") @db.VarChar(100)
+  // Dhaka Board | Rajshahi Board | Madrasah Board | NCTB | IB | Cambridge
+  affiliationNo     String? @map("affiliation_no") @db.VarChar(100)
+  // board-issued affiliation/recognition number
+
+  // ── Academic Structure ─────────────────────────────────────
+  medium             String   @default("bangla") @map("medium") @db.VarChar(20)
+  // bangla | english | both
+  // affects UI language, report card language, certificate language
+  educationLevel     String[] @map("education_level")
+  // primary | junior_secondary | secondary | higher_secondary
+  // PSC | JSC | SSC | HSC — one school may span multiple
+  shift              String   @default("day") @map("shift") @db.VarChar(20)
+  // day | morning | both
+  // many BD govt schools run two shifts with different student bodies
+  hasHostel          Boolean  @default(false) @map("has_hostel")
+  // boarding/residential facility — affects fee structure
+  hasPermanentCampus Boolean  @default(false) @map("has_permanent_campus")
+  hostelCapacity     Int?     @map("hostel_capacity")
+  // total hostel seats
+
+  // ── Head of Institution ────────────────────────────────────
+  headTeacherTitle String? @map("head_teacher_title") @db.VarChar(50)
+  // Principal | Headmaster | Headmistress | Superintendent
+  // title varies: college = Principal, school = Headmaster/Headmistress
+
+  // ── Capacity & Statistics ──────────────────────────────────
+  totalRooms           Int? @map("total_rooms")
+  // number of classrooms — used in BANBEIS annual census
+  totalStudentCapacity Int? @map("total_student_capacity")
+  // actual physical capacity
+  currentStudentCount  Int? @default(0) @map("current_student_count")
+  // denormalized count for quick dashboard — updated via trigger/cron
+  currentTeacherCount  Int? @default(0) @map("current_teacher_count")
+
+  // ── Social & Public Links ──────────────────────────────────
+  facebookPage   String? @map("facebook_page") @db.VarChar(500)
+  // Facebook is the dominant social platform for BD schools
+  youtubeChannel String? @map("youtube_channel") @db.VarChar(500)
+  // many BD schools post results, events on YouTube
+
+  // ── School admin (primary person) ──────────────────────────
+  adminUserId String? @map("admin_user_id") @db.Uuid
+  adminUser   User?   @relation(fields: [adminUserId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  // FK → public.users.id — the principal/admin who owns this school's account
+  // nullable until school is activated and admin user is created
+  // this replaces principalName — store name in user_profiles, not here
+
+  // principalName REMOVED — name lives in public.users + tenant.user_profiles
+  // storing a name here creates data duplication and sync issues
+
+  // ── Branding ───────────────────────────────────────────────
+  logoUrl   String? @map("logo_url") @db.VarChar(500)
+  // stored in Cloudflare R2 — set after activation
+  bannerUrl String? @map("banner_url") @db.VarChar(500)
+  // optional banner for school portal landing page
+
+  // ── Subscription ────────────────────────────────────────────
+  activeSubscriptionId String?              @unique @map("active_subscription_id") @db.Uuid
+  activeSubscription   SchoolSubscription?  @relation("ActiveSubscription", fields: [activeSubscriptionId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  // FK → the currently-effective subscription row
+  // Unique because only 1 row can be the "live" subscription at a time
+  subscriptions        SchoolSubscription[] @relation("AllSubscriptions")
+  // history — all past & future subscription rows
+
+  // ── Domain ─────────────────────────────────────────────────
+  // Custom domain settings
+  isCustomDomainEnabled Boolean @default(false) @map("is_custom_domain_enabled")
+  // flag to enable/disable custom domain
+  customDomain          String? @unique @map("custom_domain") @db.VarChar(255)
+  // unique constraint added — two schools cannot claim same custom domain
+  customDomainVerified  Boolean @default(false) @map("custom_domain_verified")
+  // custom domain needs CNAME verification before going live
+
+  // ── Status lifecycle ───────────────────────────────────────
+  status String @default("pending") @db.VarChar(30)
+  // pending | active | suspended | rejected | trial | expired
+
+  // ── Who created it ─────────────────────────────────────────
+  createdBy   String  @default("public") @map("created_by") @db.VarChar(20)
+  // public | superadmin
+  createdById String? @map("created_by_id") @db.Uuid
+  // super admin user id if created from admin panel
+
+  // ── Activation tracking ────────────────────────────────────
+  activatedAt DateTime? @map("activated_at") @db.Timestamptz
+  activatedBy String?   @map("activated_by") @db.Uuid
+  // which super admin approved/activated
+
+  // ── Suspension ─────────────────────────────────────────────
+  suspendedAt     DateTime? @map("suspended_at") @db.Timestamptz
+  suspendedReason String?   @map("suspended_reason") @db.Text
+  // why the school was suspended — visible to super admin
+
+  // ── Rejection ──────────────────────────────────────────────
+  rejectedAt     DateTime? @map("rejected_at") @db.Timestamptz
+  rejectedReason String?   @map("rejected_reason") @db.Text
+
+  // ── Metadata ───────────────────────────────────────────────
+  notes String? @db.Text
+  // internal super admin notes about this school — not visible to school
+
+  // ── Timestamps ─────────────────────────────────────────────
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  // ── Soft delete ────────────────────────────────────────────
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz
+  // Soft-deleted schools are hidden from all queries by default.
+  // Use deletedAt IS NOT NULL to restore or audit deleted schools.
+  deletedBy String?   @map("deleted_by") @db.Uuid
+  // super admin who performed the soft delete
+
+  bankAccounts SchoolBankAccount[]
+
+  // ── Indexes ────────────────────────────────────────────────
+  @@index([status])
+  @@index([districtId])
+  @@index([contactEmail])
+  @@index([contactPhone])
+  @@index([adminUserId])
+  @@index([activeSubscriptionId])
+  @@index([deletedAt])
+  @@map("schools")
+  @@schema("public")
+}
+
+model SchoolBankAccount {
+  id       String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  schoolId String @map("school_id") @db.Uuid
+
+  // ── Account identity ───────────────────────────────────────
+  accountLabel   String  @map("account_label") @db.VarChar(100)
+  // e.g. "MPO Salary Account" | "Student Fee Account" | "Development Fund"
+  accountPurpose String  @map("account_purpose") @db.VarChar(50)
+  // salary | fees | development | grant | general
+  isPrimary      Boolean @default(false) @map("is_primary")
+  // which account is shown by default on fee receipts / invoices
+
+  // ── Bank details ───────────────────────────────────────────
+  bankName      String  @map("bank_name") @db.VarChar(100)
+  bankBranch    String? @map("bank_branch") @db.VarChar(100)
+  bankRoutingNo String? @map("bank_routing_no") @db.VarChar(20)
+  accountNo     String  @map("account_no") @db.VarChar(50)
+  accountName   String  @map("account_name") @db.VarChar(255)
+  // legal account holder name — may differ from schoolName
+
+  // ── Mobile banking ─────────────────────────────────────────
+  mobileBankingProvider String? @map("mobile_banking_provider") @db.VarChar(20)
+  // bKash | Nagad | Rocket | null (not a mobile banking account)
+  mobileBankingNo       String? @map("mobile_banking_no") @db.VarChar(20)
+  // merchant/personal number
+
+  // ── Status ─────────────────────────────────────────────────
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  // ── Soft delete ────────────────────────────────────────────
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz
+  deletedBy String?   @map("deleted_by") @db.Uuid
+
+  school School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+
+  @@index([schoolId])
+  @@index([accountPurpose])
+  @@index([deletedAt])
+  @@map("school_bank_accounts")
+  @@schema("public")
+}
+
+/// ─────────────────────────────────────────────────────────────────────────────
+/// SUBSCRIPTION PLANS — the plan catalog (public or private/custom)
+/// ─────────────────────────────────────────────────────────────────────────────
+///
+/// Standard plans (basic / standard / premium) have isPublic = true and appear
+/// on the pricing page.
+/// Custom plans have isPublic = false — they are created by the super admin for
+/// a specific school and never appear on the public pricing page.
+/// All limits are nullable; null means "unlimited" (no cap enforced).
+model SubscriptionPlan {
+  id   String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  slug String @unique @db.VarChar(50)
+  // unique URL-safe identifier: "basic" | "standard" | "premium" | "custom-<uuid>"
+
+  // ── Display ─────────────────────────────────────────────────
+  name        String  @db.VarChar(100)
+  // Human-readable: "Basic", "Standard", "Premium", "Custom – Green Valley School"
+  tagline     String? @db.VarChar(255)
+  // Short marketing line shown on pricing cards
+  description String? @db.Text
+  // Longer description shown in plan detail or tooltip
+
+  // ── Visibility ──────────────────────────────────────────────
+  isPublic  Boolean @default(true) @map("is_public")
+  // false → custom plan, hidden from pricing page, specific to one school
+  isActive  Boolean @default(true) @map("is_active")
+  // soft-disable a plan without deleting (e.g. retiring "basic")
+  sortOrder Int     @default(0) @map("sort_order")
+  // controls order on pricing page: 0 = first
+
+  // ── Pricing ─────────────────────────────────────────────────
+  priceBdt     Decimal          @default(0) @map("price_bdt") @db.Decimal(12, 2)
+  // Monthly price in BDT; 0 means free tier
+  billingCycle PlanBillingCycle @default(monthly) @map("billing_cycle")
+  // monthly | quarterly | semi_annual | annual | lifetime | custom
+  setupFeeBdt  Decimal          @default(0) @map("setup_fee_bdt") @db.Decimal(12, 2)
+  // one-time activation / onboarding fee
+  trialDays    Int              @default(0) @map("trial_days")
+  // 0 means no trial; > 0 means free trial before billing starts
+
+  // ── Grace period ────────────────────────────────────────────
+  gracePeriodDays Int @default(7) @map("grace_period_days")
+  // how many days after expiry before the school is suspended
+
+  // ── Resource limits (null = unlimited) ──────────────────────
+  maxStudents Int? @map("max_students")
+  maxTeachers Int? @map("max_teachers")
+  maxStaff    Int? @map("max_staff")
+  maxClasses  Int? @map("max_classes")
+  // number of class sections (e.g. VI-A, VI-B …)
+  maxSubjects Int? @map("max_subjects")
+  maxBranches Int? @map("max_branches")
+  // 1 for single-campus schools, >1 for multi-campus premium plans
+  storageGb   Int? @map("storage_gb")
+  // cloud storage quota for documents, photos, reports (null = unlimited)
+
+  // ── Free-tier embedded quota ─────────────────────────────────
+  freeStudentLimit Int @default(0) @map("free_student_limit")
+  // how many students are included before billing kicks in (useful for freemium)
+
+  // ── Feature flags ───────────────────────────────────────────
+  // Use booleans for features that are on/off per plan
+  hasSmsNotifications        Boolean @default(false) @map("has_sms_notifications")
+  hasEmailNotifications      Boolean @default(true) @map("has_email_notifications")
+  hasParentPortal            Boolean @default(false) @map("has_parent_portal")
+  hasOnlineAdmission         Boolean @default(false) @map("has_online_admission")
+  hasOnlineFeePayment        Boolean @default(false) @map("has_online_fee_payment")
+  hasResultPublishing        Boolean @default(false) @map("has_result_publishing")
+  hasCustomDomain            Boolean @default(false) @map("has_custom_domain")
+  hasApiAccess               Boolean @default(false) @map("has_api_access")
+  hasAdvancedReports         Boolean @default(false) @map("has_advanced_reports")
+  hasPrioritySupport         Boolean @default(false) @map("has_priority_support")
+  hasDedicatedAccountManager Boolean @default(false) @map("has_dedicated_account_manager")
+
+  // ── Metadata ────────────────────────────────────────────────
+  metadata  Json?
+  // arbitrary key-value for future feature flags without schema changes
+  notes     String?  @db.Text
+  // internal super-admin notes (not visible to schools)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  subscriptions SchoolSubscription[]
+
+  @@index([isPublic, isActive])
+  @@index([slug])
+  @@map("subscription_plans")
+  @@schema("public")
+}
+
+/// Each row represents one subscription period for a school.
+/// Limits stored here are the *effective* limits for that period —
+/// they are copied/overridden from the plan at activation time, so changing
+/// a plan template later does not retroactively affect existing subscriptions.
+model SchoolSubscription {
+  id       String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  schoolId String @map("school_id") @db.Uuid
+  planId   String @map("plan_id") @db.Uuid
+
+  // ── Period ──────────────────────────────────────────────────
+  startsAt    DateTime  @map("starts_at") @db.Timestamptz
+  expiresAt   DateTime? @map("expires_at") @db.Timestamptz
+  // null means lifetime / no expiry
+  trialEndsAt DateTime? @map("trial_ends_at") @db.Timestamptz
+  // if the subscription started with a trial
+
+  // ── Status ──────────────────────────────────────────────────
+  status          SubscriptionStatus @default(trial)
+  gracePeriodDays Int                @default(7) @map("grace_period_days")
+  // copied from plan at activation; can be overridden here for custom deals
+
+  // ── Effective limits (snapshot from plan, overridable) ────────
+  // Copied at activation so plan changes don't break existing subs.
+  // Super admin can override individual fields here for custom deals
+  // without modifying the plan template.
+  maxStudents Int? @map("max_students")
+  maxTeachers Int? @map("max_teachers")
+  maxStaff    Int? @map("max_staff")
+  maxClasses  Int? @map("max_classes")
+  maxSubjects Int? @map("max_subjects")
+  maxBranches Int? @map("max_branches")
+  storageGb   Int? @map("storage_gb")
+
+  freeStudentLimit Int @default(0) @map("free_student_limit")
+
+  // ── Effective feature flags (snapshot, overridable) ──────────
+  hasSmsNotifications        Boolean @default(false) @map("has_sms_notifications")
+  hasEmailNotifications      Boolean @default(true) @map("has_email_notifications")
+  hasParentPortal            Boolean @default(false) @map("has_parent_portal")
+  hasOnlineAdmission         Boolean @default(false) @map("has_online_admission")
+  hasOnlineFeePayment        Boolean @default(false) @map("has_online_fee_payment")
+  hasResultPublishing        Boolean @default(false) @map("has_result_publishing")
+  hasCustomDomain            Boolean @default(false) @map("has_custom_domain")
+  hasApiAccess               Boolean @default(false) @map("has_api_access")
+  hasAdvancedReports         Boolean @default(false) @map("has_advanced_reports")
+  hasPrioritySupport         Boolean @default(false) @map("has_priority_support")
+  hasDedicatedAccountManager Boolean @default(false) @map("has_dedicated_account_manager")
+
+  // ── Pricing snapshot ────────────────────────────────────────
+  priceBdt     Decimal          @default(0) @map("price_bdt") @db.Decimal(12, 2)
+  // price agreed for this subscription (may differ from plan price for custom)
+  billingCycle PlanBillingCycle @default(monthly) @map("billing_cycle")
+  setupFeeBdt  Decimal          @default(0) @map("setup_fee_bdt") @db.Decimal(12, 2)
+  discountPct  Decimal          @default(0) @map("discount_pct") @db.Decimal(5, 2)
+  // percentage discount (0–100) negotiated for this school
+  discountNote String?          @map("discount_note") @db.VarChar(255)
+  // reason for discount: "Annual upfront discount", "NGO partner", etc.
+
+  // ── Audit ───────────────────────────────────────────────────
+  activatedBy  String?   @map("activated_by") @db.Uuid
+  // super admin user id who activated/approved this subscription
+  cancelledAt  DateTime? @map("cancelled_at") @db.Timestamptz
+  cancelledBy  String?   @map("cancelled_by") @db.Uuid
+  cancelReason String?   @map("cancel_reason") @db.Text
+
+  // ── Internal notes ──────────────────────────────────────────
+  notes    String? @db.Text
+  // super admin notes (e.g. "negotiated by CEO, renewal due next March")
+  metadata Json?
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  school    School                       @relation("AllSubscriptions", fields: [schoolId], references: [id], onDelete: Cascade)
+  plan      SubscriptionPlan             @relation(fields: [planId], references: [id], onDelete: Restrict)
+  activeFor School?                      @relation("ActiveSubscription")
+  discounts SchoolSubscriptionDiscount[]
+
+  @@index([schoolId])
+  @@index([planId])
+  @@index([status])
+  @@index([expiresAt])
+  // needed for cron that detects expiring subscriptions
+  @@map("school_subscriptions")
+  @@schema("public")
+}
+
+/// ─────────────────────────────────────────────────────────────────────────────
+/// VOUCHERS — reusable discount codes (the template / catalog)
+/// ─────────────────────────────────────────────────────────────────────────────
+///
+/// A Voucher is the reusable discount code template (like a coupon).
+/// When applied to a subscription, a SchoolSubscriptionDiscount row is created
+/// that snapshots the voucher value at redemption time.
+model Voucher {
+  id   String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code String @unique @db.VarChar(50)
+  // e.g. "SCHOOL50" | "NGO2025" | "LAUNCH20"
+
+  // ── Display ─────────────────────────────────────────────
+  name        String  @db.VarChar(100)
+  // Internal name: "Launch Discount", "NGO Partner Code"
+  description String? @db.Text
+  // Optional: visible to school on invoice
+
+  // ── Discount value ──────────────────────────────────────
+  discountType   DiscountValueType @map("discount_type")
+  discountValue  Decimal           @map("discount_value") @db.Decimal(10, 2)
+  // percentage: 0–100, fixed_amount: BDT value
+  maxDiscountBdt Decimal?          @map("max_discount_bdt") @db.Decimal(12, 2)
+  // caps percentage discounts: e.g. 50% but never more than BDT 1000
+  // ignored for fixed_amount discounts
+
+  // ── Redemption limits ──────────────────────────────────
+  maxRedemptions     Int?    @map("max_redemptions")
+  // null = unlimited redemptions
+  currentRedemptions Int     @default(0) @map("current_redemptions")
+  // incremented each time a school redeems this voucher
+  onePerSchool       Boolean @default(true) @map("one_per_school")
+  // if true: a single school can only redeem this voucher once
+
+  // ── Duration ─────────────────────────────────────────────
+  durationCycles Int? @default(1) @map("duration_cycles")
+  // 1  = discount applies for 1 billing cycle only (most common)
+  // >1 = applies for N consecutive billing cycles
+  // null = applies for the lifetime of the subscription (recurring)
+
+  // ── Restrictions ─────────────────────────────────────────
+  applicablePlanIds String[] @map("applicable_plan_ids")
+  // empty array [] = valid for ALL plans; otherwise restrict to listed plan UUIDs
+  minimumBillBdt    Decimal? @map("minimum_bill_bdt") @db.Decimal(12, 2)
+  // voucher only valid if the bill is at least this amount
+
+  // ── Validity window ──────────────────────────────────────
+  validFrom DateTime  @default(now()) @map("valid_from") @db.Timestamptz
+  expiresAt DateTime? @map("expires_at") @db.Timestamptz
+  // null = no expiry
+  isActive  Boolean   @default(true) @map("is_active")
+
+  // ── Audit ────────────────────────────────────────────────
+  createdBy String?  @map("created_by") @db.Uuid
+  notes     String?  @db.Text
+  // internal super admin notes about this voucher
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  redemptions SchoolSubscriptionDiscount[]
+
+  @@index([code])
+  @@index([isActive, expiresAt])
+  @@map("vouchers")
+  @@schema("public")
+}
+
+/// Each row = one discount/adjustment applied to a subscription.
+/// Covers both voucher redemptions and manual super admin adjustments.
+/// Acts as a full audit trail of every discount ever applied.
+model SchoolSubscriptionDiscount {
+  id             String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  subscriptionId String @map("subscription_id") @db.Uuid
+
+  // ── Adjustment type ────────────────────────────────────────
+  adjustmentType DiscountAdjustmentType @map("adjustment_type")
+  // voucher | manual
+
+  // ── Voucher reference (only when adjustmentType = voucher) ─────
+  voucherId   String? @map("voucher_id") @db.Uuid
+  voucherCode String? @map("voucher_code") @db.VarChar(50)
+  // snapshot of the code at redemption time — kept even if voucher is deleted
+
+  // ── Discount value snapshot ─────────────────────────────
+  // Snapshot at application time — voucher changes don't affect past records
+  discountType      DiscountValueType @map("discount_type")
+  discountValue     Decimal           @map("discount_value") @db.Decimal(10, 2)
+  // raw value: % number or BDT amount as entered
+  discountAmountBdt Decimal           @map("discount_amount_bdt") @db.Decimal(12, 2)
+  // computed BDT deduction: (priceBdt * discountValue / 100) or discountValue
+  // capped by maxDiscountBdt if applicable — stored for invoice display
+
+  // ── Duration ─────────────────────────────────────────────
+  durationCycles     Int? @map("duration_cycles")
+  // copied from voucher.durationCycles; for manual: set by admin
+  // null = apply every billing cycle for lifetime of subscription
+  appliedCyclesCount Int  @default(0) @map("applied_cycles_count")
+  // incremented each billing cycle this discount is applied
+  // when appliedCyclesCount >= durationCycles → discount is exhausted
+
+  // ── Status ───────────────────────────────────────────────
+  isActive     Boolean   @default(true) @map("is_active")
+  // false = revoked (e.g. fraudulent voucher) without deleting the audit row
+  revokedAt    DateTime? @map("revoked_at") @db.Timestamptz
+  revokedBy    String?   @map("revoked_by") @db.Uuid
+  revokeReason String?   @map("revoke_reason") @db.Text
+
+  // ── Audit ───────────────────────────────────────────────
+  appliedBy String? @map("applied_by") @db.Uuid
+  // user who applied: school admin (voucher) or super admin (manual/voucher)
+  reason    String? @db.Text
+  // required for manual adjustments, optional for voucher:
+  // e.g. "Compensation for 3-day outage", "Loyalty reward", "NGO partnership"
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  subscription SchoolSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  voucher      Voucher?           @relation(fields: [voucherId], references: [id], onDelete: SetNull)
+
+  @@index([subscriptionId])
+  @@index([voucherId])
+  @@index([adjustmentType])
+  @@index([isActive])
+  @@map("school_subscription_discounts")
+  @@schema("public")
+}
+
+model AcademicSession {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name      String   @db.VarChar(255)
+  year      Int      @unique
+  status    String   @default("ACTIVE") @db.VarChar(50)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@index([status])
+  @@map("academic_sessions")
+  @@schema("public")
+}
+
+model Division {
+  id     Int    @id
+  // ID from official BD government dataset (1–8). No autoincrement — IDs are fixed.
+  bnName String @map("bn_name") @db.VarChar(255)
+  enName String @map("en_name") @db.VarChar(255)
+
+  districts             District[]
+  schools               School[]
+  userProfilesPresent   UserProfile[] @relation("UserProfilePresentDivision")
+  userProfilesPermanent UserProfile[] @relation("UserProfilePermanentDivision")
+
+  @@map("divisions")
+  @@schema("public")
+}
+
+model District {
+  id         Int     @id
+  // ID from official BD government dataset. No autoincrement — IDs are fixed.
+  divisionId Int     @map("pid")
+  // pid = parent division id
+  bnName     String  @map("bn_name") @db.VarChar(255)
+  enName     String? @map("en_name") @db.VarChar(255)
+  // nullable: some districts (e.g. Rangpur City) have NULL en_name in source data
+
+  division              Division      @relation(fields: [divisionId], references: [id], onDelete: Cascade)
+  upazilas              Upazila[]
+  schools               School[]
+  userProfilesPresent   UserProfile[] @relation("UserProfilePresentDistrict")
+  userProfilesPermanent UserProfile[] @relation("UserProfilePermanentDistrict")
+
+  @@index([divisionId])
+  @@map("districts")
+  @@schema("public")
+}
+
+model Upazila {
+  id         Int     @id
+  // ID from official BD government dataset. No autoincrement — IDs are fixed.
+  districtId Int     @map("pid")
+  // pid = parent district id
+  bnName     String  @map("bn_name") @db.VarChar(255)
+  enName     String? @map("en_name") @db.VarChar(255)
+  // nullable: a few upazilas have NULL en_name in source data
+
+  district              District      @relation(fields: [districtId], references: [id], onDelete: Cascade)
+  unions                Union[]
+  schools               School[]
+  userProfilesPresent   UserProfile[] @relation("UserProfilePresentUpazila")
+  userProfilesPermanent UserProfile[] @relation("UserProfilePermanentUpazila")
+
+  @@index([districtId])
+  @@map("upazilas")
+  @@schema("public")
+}
+
+model Union {
+  id        Int     @id
+  // ID from official BD government dataset. No autoincrement — IDs are fixed.
+  upazilaId Int     @map("pid")
+  // pid = parent upazila id
+  areaType  String? @map("area_type") @db.VarChar(50)
+  bnName    String  @map("bn_name") @db.VarChar(255)
+  enName    String? @map("en_name") @db.VarChar(255)
+  // nullable: 336 of 5595 unions had no English name in source data (filled via transliteration)
+  name      String  @db.VarChar(255)
+
+  upazila               Upazila       @relation(fields: [upazilaId], references: [id], onDelete: Cascade)
+  userProfilesPresent   UserProfile[] @relation("UserProfilePresentUnion")
+  userProfilesPermanent UserProfile[] @relation("UserProfilePermanentUnion")
+
+  @@index([upazilaId])
+  @@map("unions")
+  @@schema("public")
+}

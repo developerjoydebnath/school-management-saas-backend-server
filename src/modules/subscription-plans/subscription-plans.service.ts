@@ -1,0 +1,130 @@
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { PrismaService } from '../../cores/prisma.service';
+import { CreateSubscriptionPlanDto } from './dto/create-subscription-plan.dto';
+import { UpdateSubscriptionPlanDto } from './dto/update-subscription-plan.dto';
+
+@Injectable()
+export class SubscriptionPlansService {
+  constructor(private readonly prisma: PrismaService) {}
+
+  async create(createDto: CreateSubscriptionPlanDto) {
+    const slug = await this.generateUniqueSlug(createDto.name);
+
+    return this.prisma.subscriptionPlan.create({
+      data: {
+        ...createDto,
+        slug,
+      },
+    });
+  }
+
+  async findAll(query: any = {}) {
+    const page = query.page ? parseInt(query.page) : 1;
+    const limit = query.limit ? parseInt(query.limit) : 20;
+    const skip = (page - 1) * limit;
+
+    const where: any = {};
+    if (query.isPublic !== undefined) {
+      where.isPublic = query.isPublic === 'true' || query.isPublic === true;
+    }
+    if (query.isActive !== undefined) {
+      where.isActive = query.isActive === 'true' || query.isActive === true;
+    }
+
+    const [items, total] = await Promise.all([
+      this.prisma.subscriptionPlan.findMany({
+        where,
+        orderBy: { sortOrder: 'asc' },
+        skip,
+        take: limit,
+      }),
+      this.prisma.subscriptionPlan.count({ where }),
+    ]);
+
+    return {
+      items,
+      meta: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
+  }
+
+  async findOne(id: string) {
+    const plan = await this.prisma.subscriptionPlan.findUnique({
+      where: { id },
+    });
+    if (!plan) {
+      throw new NotFoundException(`Subscription plan with ID ${id} not found`);
+    }
+    return plan;
+  }
+
+  async update(id: string, updateDto: UpdateSubscriptionPlanDto) {
+    await this.findOne(id); // Ensure it exists
+
+    let slug;
+    if (updateDto.name) {
+      slug = await this.generateUniqueSlug(updateDto.name, id);
+    }
+
+    return this.prisma.subscriptionPlan.update({
+      where: { id },
+      data: {
+        ...updateDto,
+        ...(slug ? { slug } : {}),
+      },
+    });
+  }
+
+  async remove(id: string) {
+    await this.findOne(id);
+    return this.prisma.subscriptionPlan.delete({
+      where: { id },
+    });
+  }
+
+  async updateIsPublic(id: string, isPublic: boolean) {
+    await this.findOne(id);
+    return this.prisma.subscriptionPlan.update({
+      where: { id },
+      data: { isPublic },
+    });
+  }
+
+  async updateIsActive(id: string, isActive: boolean) {
+    await this.findOne(id);
+    return this.prisma.subscriptionPlan.update({
+      where: { id },
+      data: { isActive },
+    });
+  }
+
+  private async generateUniqueSlug(
+    name: string,
+    excludeId?: string,
+  ): Promise<string> {
+    const base = name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .substring(0, 45);
+
+    let slug = base;
+    let counter = 1;
+
+    while (true) {
+      const exists = await this.prisma.subscriptionPlan.findFirst({
+        where: {
+          slug,
+          ...(excludeId ? { id: { not: excludeId } } : {}),
+        },
+      });
+      if (!exists) return slug;
+      slug = `${base}-${counter}`;
+      counter++;
+    }
+  }
+}

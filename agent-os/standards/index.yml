@@ -1,0 +1,14 @@
+# Agent OS Standards Index
+backend:
+  auth-guards:
+    description: "Authentication and Guards: API key global enforcement for microservice protection, and combined JWT/Permission guards for fine-grained endpoint access control"
+  controllers-and-dtos:
+    description: "Controllers and DTOs: Class-validator DTOs for strict input typing, RESTful controller delegation, and automatic OpenAPI generation via Swagger decorators"
+  error-handling-and-interceptors:
+    description: "Error Handling and Interceptors: Uniform JSON envelopes for successful responses via ResponseInterceptor and consistent error formatting via GlobalExceptionFilter"
+  modules-auth-db:
+    description: "Modules, Auth, and DB Schema: Domain-driven module structure, bcrypt credential hashing guidelines, and public vs tenant database schema isolation rules"
+  multi-tenancy:
+    description: "PostgreSQL schema-based multi-tenancy: tenant detection via JWT/Host/Origin headers and request-scoped PrismaClient instances"
+  soft-delete:
+    description: "Soft Delete: Prisma client extension that blocks hard deletes and auto-filters deleted rows on all queries. Schema fields (deletedAt/deletedBy), partial unique indexes, softDelete()/softRestore() helpers, and the pre-create conflict check pattern for re-registration flows"

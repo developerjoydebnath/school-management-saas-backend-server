@@ -1,0 +1,130 @@
+# Modules, Auth, and DB Schema
+
+## Module Structure
+
+NestJS features must be organized by domain inside the `src/modules/` directory (e.g., `src/modules/academics/sessions`). Each module must encapsulate its own Controller, Service, Module definition, and a `dto/` folder.
+
+```typescript
+// ✅ Correct Directory Structure
+src/modules/academics/sessions/
+  ├── dto/
+  │   └── session.dto.ts
+  ├── sessions.controller.ts
+  ├── sessions.service.ts
+  └── sessions.module.ts
+```
+
+**Why:** Domain-driven grouping prevents the codebase from becoming a tangled monolith of "all controllers" and "all services". It ensures that code relating to a specific business feature is kept close together, making it easier to maintain, extract, or refactor later.
+
+## Authentication Flows
+
+Sensitive credentials generated during authentication flows (like Refresh Tokens and Password Reset OTPs) must never be stored in plain text. They must be hashed using `bcrypt` before being saved to the database. Access tokens should be short-lived (e.g., 20m) and refresh tokens long-lived (e.g., 15d).
+
+```typescript
+// ✅ Correct
+const hashedRefreshToken = await bcrypt.hash(refreshToken, 10);
+await this.prismaService.user.update({ data: { hashedRefreshToken } });
+
+// ❌ Wrong
+await this.prismaService.user.update({ data: { refreshToken } });
+```
+
+**Why:** Storing tokens or OTPs in plaintext creates a severe security vulnerability. If the database is compromised, an attacker could use plain refresh tokens or active OTPs to immediately hijack user accounts without needing to crack passwords.
+
+## Database Schema & Isolation
+
+When designing Prisma schemas for multi-tenancy, authentication credentials (`User`) must reside in the global `public` schema, while school-specific details (`UserProfile`) must reside in the tenant's isolated schema. Additionally, primary keys should use UUIDs via `gen_random_uuid()` instead of autoincrementing integers, and timestamps must use `@db.Timestamptz`.
+
+## Prisma Schema Formatting Standards
+
+To maintain consistency and optimize database performance across schemas, strictly follow these formatting and indexing rules for `schema.prisma`:
+
+1. **CamelCase Fields to Snake_Case Columns**: Always define Prisma fields in `camelCase` for TypeScript compatibility, and map them to `snake_case` column names using `@map("snake_case")`.
+2. **Explicit Table and Schema Mapping**: Every model MUST define its table name in snake_case and explicitly declare its schema via `@@map("table_name")` and `@@schema("schema_name")`.
+3. **Database Indexing**: Add `@@index([...])` blocks to models to optimize frequently queried fields (that aren't already covered by `@@unique`) to make DB queries faster.
+4. **Relationship Maintenance**: Clearly define and maintain relationships between models, ensuring proper references and array formats are kept intact (e.g., `permissions UserPermission[]`).
+
+```prisma
+// ✅ Correct
+model UserProfile {
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String    @unique @map("user_id") @db.Uuid
+  fullName  String    @map("full_name") @db.VarChar(255)
+  phone     String?   @db.VarChar(20)
+
+  permissions UserPermission[]
+
+  // Optimize lookups
+  @@index([phone])
+
+  // Explicit mappings
+  @@map("user_profiles")
+  @@schema("public") // or "tenant" based on the domain
+}
+
+// ❌ Wrong
+model UserProfile {
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id   String    @unique @db.Uuid // Wrong: snake_case in Prisma field
+  fullName  String    @db.VarChar(255) // Wrong: missing @map("full_name")
+
+  // Wrong: missing @@index
+  // Wrong: missing @@map and @@schema
+}
+```
+
+**Why:** Prisma translates model definitions directly into TypeScript types. Using `camelCase` keeps the application code idiomatic, while mapping to `snake_case` adheres to Postgres database conventions. Defining schemas, table names, and indexes explicitly ensures that queries are consistently fast, and multi-tenant schema isolation behaves correctly.
+
+## Multi-Identifier Login
+
+The `signIn` method must support three login identifier types from a **single input field**:
+
+| Role                                    | Identifier         | Column         |
+| --------------------------------------- | ------------------ | -------------- |
+| Super admin                             | `email@domain.com` | `email`        |
+| School admin / Teacher / Staff / Parent | `01XXXXXXXXX`      | `phone`        |
+| Student                                 | `STU-YYYY-NNN`     | `student_code` |
+
+The identifier type is detected at runtime by regex before querying. Each type maps to its own Prisma `@@unique([field, schemaName])` compound index, so `findUnique` uses the correct index path with **no raw SQL**.
+
+```typescript
+// ✅ Correct — type-safe, injection-proof, uses indexed @@unique paths
+async signIn(dto: SignInDto) {
+  const schemaName = this.tenantConnection.getTenantSchema();
+  const { identifier, password } = dto;
+
+  const isStudentCode = /^STU-\d{4}-\d+$/i.test(identifier);
+  const isPhone       = /^01[3-9]\d{8}$/.test(identifier);
+  const isEmail       = identifier.includes('@');
+
+  if (!isStudentCode && !isPhone && !isEmail) {
+    throw new UnauthorizedException('Enter a valid Student ID, phone number, or email address');
+  }
+
+  let user: Awaited<ReturnType<typeof this.prismaService.user.findUnique>>;
+
+  if (isStudentCode) {
+    user = await this.prismaService.user.findUnique({
+      where: { studentCode_schemaName: { studentCode: identifier, schemaName } },
+    });
+  } else if (isPhone) {
+    user = await this.prismaService.user.findUnique({
+      where: { phone_schemaName: { phone: identifier, schemaName } },
+    });
+  } else {
+    user = await this.prismaService.user.findUnique({
+      where: { email_schemaName: { email: identifier, schemaName } },
+    });
+  }
+
+  if (!user || !user.isActive) throw new UnauthorizedException('Invalid credentials');
+  // ... bcrypt compare, token issuance
+}
+
+// ❌ Wrong — raw SQL is a SQL injection risk; also bypasses Prisma's type safety
+const user = await prisma.$queryRawUnsafe(`
+  SELECT * FROM public.users WHERE ${whereClause} AND schema_name = '${schema}'
+`);
+```
+
+**Why:** Three sibling students can share the same parent phone number but each has a unique `student_code`. Email-only login would force students to have individual email addresses, which is impractical for school-aged children. Separating the identifier column per role avoids collisions while using the correct index for every lookup.
