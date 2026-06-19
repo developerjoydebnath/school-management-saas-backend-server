@@ -12,3 +12,7 @@ backend:
     description: "PostgreSQL schema-based multi-tenancy: tenant detection via JWT/Host/Origin headers and request-scoped PrismaClient instances"
   soft-delete:
     description: "Soft Delete: Prisma client extension that blocks hard deletes and auto-filters deleted rows on all queries. Schema fields (deletedAt/deletedBy), partial unique indexes, softDelete()/softRestore() helpers, and the pre-create conflict check pattern for re-registration flows"
+  response-format:
+    description: "Response Formatting and Module Definitions: Enforces standard pagination objects with `items` and `meta` (page, limit, totalPages), and requires modules to import/provide `PrismaService` and `TenantConnectionService` directly."
+  filter:
+    description: "List Filtering and Pagination Queries: Define complex array query parameters as `@Query('paramName') paramName?: string | string[]`, normalize them, and use `hasSome` or `in` Prisma filters."

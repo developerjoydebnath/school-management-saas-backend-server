@@ -10,10 +10,10 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Role } from '@prisma/client';
+import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
-import { Roles } from '../../common/decorators/roles.decorator';
-import { Role } from '@prisma/client';
 import { CreateSubscriptionPlanDto } from './dto/create-subscription-plan.dto';
 import { UpdateSubscriptionPlanDto } from './dto/update-subscription-plan.dto';
 import { SubscriptionPlansService } from './subscription-plans.service';
@@ -21,7 +21,7 @@ import { SubscriptionPlansService } from './subscription-plans.service';
 @ApiTags('subscription-plans')
 @Roles(Role.SUPER_ADMIN, Role.DEVELOPER)
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Controller('subscription-plans')
+@Controller('superadmin/subscription-plans')
 export class SubscriptionPlansController {
   constructor(
     private readonly subscriptionPlansService: SubscriptionPlansService,
@@ -36,8 +36,18 @@ export class SubscriptionPlansController {
 
   @Get()
   @ApiOperation({ summary: 'List all subscription plans' })
-  findAll(@Query() query: any) {
-    return this.subscriptionPlansService.findAll(query);
+  findAll(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('isPublic') isPublic?: string,
+    @Query('isActive') isActive?: string,
+  ) {
+    return this.subscriptionPlansService.findAll({
+      page,
+      limit,
+      isPublic,
+      isActive,
+    });
   }
 
   @Get(':id')

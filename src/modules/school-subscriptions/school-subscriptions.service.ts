@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { SubscriptionStatus } from '@prisma/client';
+import { softDelete } from '../../common/utils/soft-delete.extension';
 import { PrismaService } from '../../cores/prisma.service';
 import { CreateSchoolSubscriptionDto } from './dto/create-school-subscription.dto';
 import { UpdateSchoolSubscriptionDto } from './dto/update-school-subscription.dto';
@@ -9,12 +10,20 @@ export class SchoolSubscriptionsService {
   constructor(private readonly prisma: PrismaService) {}
 
   async create(createDto: CreateSchoolSubscriptionDto, adminId?: string) {
-    return this.prisma.schoolSubscription.create({
+    const subscription = await this.prisma.schoolSubscription.create({
       data: {
         ...createDto,
         activatedBy: adminId || null,
       },
     });
+
+    return {
+      success: true,
+      statusCode: 201,
+      message: 'School subscription created successfully',
+      data: subscription,
+      meta: null,
+    };
   }
 
   async findAll(query: any = {}) {
@@ -43,14 +52,24 @@ export class SchoolSubscriptionsService {
       this.prisma.schoolSubscription.count({ where }),
     ]);
 
+    const totalPages = Math.ceil(total / limit);
+
     return {
-      items,
-      meta: {
-        page,
-        limit,
-        total,
-        totalPages: Math.ceil(total / limit),
+      success: true,
+      statusCode: 200,
+      message: 'School subscriptions retrieved successfully',
+      data: {
+        items,
+        meta: {
+          page,
+          limit,
+          total,
+          totalPages,
+          hasNextPage: page < totalPages,
+          hasPreviousPage: page > 1,
+        },
       },
+      meta: null,
     };
   }
 
@@ -61,23 +80,42 @@ export class SchoolSubscriptionsService {
     if (!subscription) {
       throw new NotFoundException(`SchoolSubscription with ID ${id} not found`);
     }
-    return subscription;
+    return {
+      success: true,
+      statusCode: 200,
+      message: 'School subscription retrieved successfully',
+      data: subscription,
+      meta: null,
+    };
   }
 
   async update(id: string, updateDto: UpdateSchoolSubscriptionDto) {
     await this.findOne(id);
 
-    return this.prisma.schoolSubscription.update({
+    const updated = await this.prisma.schoolSubscription.update({
       where: { id },
       data: updateDto,
     });
+
+    return {
+      success: true,
+      statusCode: 200,
+      message: 'School subscription updated successfully',
+      data: updated,
+      meta: null,
+    };
   }
 
   async remove(id: string) {
     await this.findOne(id);
-    return this.prisma.schoolSubscription.delete({
-      where: { id },
-    });
+    await softDelete(this.prisma.raw.schoolSubscription, id);
+    return {
+      success: true,
+      statusCode: 200,
+      message: 'School subscription deleted successfully',
+      data: null,
+      meta: null,
+    };
   }
 
   async updateStatus(id: string, status: SubscriptionStatus, adminId?: string) {
@@ -90,9 +128,17 @@ export class SchoolSubscriptionsService {
       updateData.cancelledBy = adminId || null;
     }
 
-    return this.prisma.schoolSubscription.update({
+    const updated = await this.prisma.schoolSubscription.update({
       where: { id },
       data: updateData,
     });
+
+    return {
+      success: true,
+      statusCode: 200,
+      message: 'School subscription status updated successfully',
+      data: updated,
+      meta: null,
+    };
   }
 }

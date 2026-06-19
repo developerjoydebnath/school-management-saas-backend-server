@@ -3,6 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { softDelete } from '../../common/utils/soft-delete.extension';
 import { PrismaService } from '../../cores/prisma.service';
 import { CreateVoucherDto } from './dto/create-voucher.dto';
 import { UpdateVoucherDto } from './dto/update-voucher.dto';
@@ -22,12 +23,20 @@ export class VouchersService {
       );
     }
 
-    return this.prisma.voucher.create({
+    const voucher = await this.prisma.voucher.create({
       data: {
         ...createDto,
         createdBy: adminId || null,
       },
     });
+
+    return {
+      success: true,
+      statusCode: 201,
+      message: 'Voucher created successfully',
+      data: voucher,
+      meta: null,
+    };
   }
 
   async findAll(query: any = {}) {
@@ -50,14 +59,24 @@ export class VouchersService {
       this.prisma.voucher.count({ where }),
     ]);
 
+    const totalPages = Math.ceil(total / limit);
+
     return {
-      items,
-      meta: {
-        page,
-        limit,
-        total,
-        totalPages: Math.ceil(total / limit),
+      success: true,
+      statusCode: 200,
+      message: 'Vouchers retrieved successfully',
+      data: {
+        items,
+        meta: {
+          page,
+          limit,
+          total,
+          totalPages,
+          hasNextPage: page < totalPages,
+          hasPreviousPage: page > 1,
+        },
       },
+      meta: null,
     };
   }
 
@@ -68,7 +87,13 @@ export class VouchersService {
     if (!voucher) {
       throw new NotFoundException(`Voucher with ID ${id} not found`);
     }
-    return voucher;
+    return {
+      success: true,
+      statusCode: 200,
+      message: 'Voucher retrieved successfully',
+      data: voucher,
+      meta: null,
+    };
   }
 
   async update(id: string, updateDto: UpdateVoucherDto) {
@@ -85,24 +110,45 @@ export class VouchersService {
       }
     }
 
-    return this.prisma.voucher.update({
+    const updated = await this.prisma.voucher.update({
       where: { id },
       data: updateDto,
     });
+
+    return {
+      success: true,
+      statusCode: 200,
+      message: 'Voucher updated successfully',
+      data: updated,
+      meta: null,
+    };
   }
 
   async remove(id: string) {
     await this.findOne(id);
-    return this.prisma.voucher.delete({
-      where: { id },
-    });
+    await softDelete(this.prisma.raw.voucher, id);
+    return {
+      success: true,
+      statusCode: 200,
+      message: 'Voucher deleted successfully',
+      data: null,
+      meta: null,
+    };
   }
 
   async updateIsActive(id: string, isActive: boolean) {
     await this.findOne(id);
-    return this.prisma.voucher.update({
+    const updated = await this.prisma.voucher.update({
       where: { id },
       data: { isActive },
     });
+
+    return {
+      success: true,
+      statusCode: 200,
+      message: 'Voucher status updated successfully',
+      data: updated,
+      meta: null,
+    };
   }
 }

@@ -12,11 +12,12 @@ import { PERMISSIONS } from 'src/common/constants/permissions';
 import { RequirePermissions } from 'src/common/decorators/permissions.decorator';
 import { JwtAuthGuard } from 'src/modules/auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from 'src/modules/auth/guards/permissions.guard';
+import { RolesGuard } from 'src/modules/auth/guards/roles.guard';
 import { CreateSessionDto, UpdateSessionDto } from './dto/session.dto';
 import { SessionsService } from './sessions.service';
 
 @Controller('sessions')
-@UseGuards(JwtAuthGuard, PermissionsGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
 export class SessionsController {
   constructor(private readonly sessionsService: SessionsService) {}
 
@@ -24,6 +25,12 @@ export class SessionsController {
   @RequirePermissions(PERMISSIONS.SESSIONS.CREATE, PERMISSIONS.SESSIONS.ALL)
   create(@Body() createSessionDto: CreateSessionDto) {
     return this.sessionsService.create(createSessionDto);
+  }
+
+  @Get('active-list')
+  @RequirePermissions(PERMISSIONS.SESSIONS.VIEW, PERMISSIONS.SESSIONS.ALL)
+  findActiveList() {
+    return this.sessionsService.findActiveList();
   }
 
   @Get()

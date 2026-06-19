@@ -35,8 +35,12 @@ export class VouchersController {
 
   @Get()
   @ApiOperation({ summary: 'List all vouchers' })
-  findAll(@Query() query: any) {
-    return this.vouchersService.findAll(query);
+  findAll(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('isActive') isActive?: string,
+  ) {
+    return this.vouchersService.findAll({ page, limit, isActive });
   }
 
   @Get(':id')

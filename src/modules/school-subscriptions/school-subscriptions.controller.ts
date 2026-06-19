@@ -11,10 +11,10 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { SubscriptionStatus, Role } from '@prisma/client';
+import { Role, SubscriptionStatus } from '@prisma/client';
+import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
-import { Roles } from '../../common/decorators/roles.decorator';
 import { CreateSchoolSubscriptionDto } from './dto/create-school-subscription.dto';
 import { UpdateSchoolSubscriptionDto } from './dto/update-school-subscription.dto';
 import { SchoolSubscriptionsService } from './school-subscriptions.service';
@@ -43,8 +43,20 @@ export class SchoolSubscriptionsController {
 
   @Get()
   @ApiOperation({ summary: 'List all school subscriptions' })
-  findAll(@Query() query: any) {
-    return this.schoolSubscriptionsService.findAll(query);
+  findAll(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('status') status?: SubscriptionStatus,
+    @Query('schoolId') schoolId?: string,
+    @Query('planId') planId?: string,
+  ) {
+    return this.schoolSubscriptionsService.findAll({
+      page,
+      limit,
+      status,
+      schoolId,
+      planId,
+    });
   }
 
   @Get(':id')

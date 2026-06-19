@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   ForbiddenException,
   Get,
   Param,
@@ -29,7 +30,7 @@ import { SchoolsService } from './schools.service';
  * Superadmin-only controller.
  * All routes require JWT auth with role = 'super_admin'.
  */
-@ApiTags('superadmin / schools')
+@ApiTags('superadmin/schools')
 @ApiBearerAuth()
 @Roles(Role.SUPER_ADMIN, Role.DEVELOPER)
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -40,7 +41,10 @@ export class SchoolsController {
   // ─── Guard helper ─────────────────────────────────────────────────────────────
 
   private assertSuperAdmin(req: any): void {
-    if (req.user?.role !== 'super_admin') {
+    if (
+      req.user?.role !== Role.SUPER_ADMIN &&
+      req.user?.role !== Role.DEVELOPER
+    ) {
       throw new ForbiddenException('Access denied. Super admin role required.');
     }
   }
@@ -153,5 +157,16 @@ export class SchoolsController {
   ) {
     this.assertSuperAdmin(req);
     return this.schoolsService.reactivateSchool(id, req.user.userId);
+  }
+
+  /**
+   * DELETE /superadmin/schools/:id
+   * Soft delete a school.
+   */
+  @Delete(':id')
+  @ApiOperation({ summary: 'Soft delete a school' })
+  async remove(@Request() req: any, @Param('id', ParseUUIDPipe) id: string) {
+    this.assertSuperAdmin(req);
+    return this.schoolsService.remove(id);
   }
 }

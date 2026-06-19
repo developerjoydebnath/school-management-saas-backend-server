@@ -11,10 +11,10 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Role } from '@prisma/client';
+import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
-import { Roles } from '../../common/decorators/roles.decorator';
-import { Role } from '@prisma/client';
 import { CreateSchoolSubscriptionDiscountDto } from './dto/create-school-subscription-discount.dto';
 import { UpdateSchoolSubscriptionDiscountDto } from './dto/update-school-subscription-discount.dto';
 import { SchoolSubscriptionDiscountsService } from './school-subscription-discounts.service';
@@ -44,8 +44,20 @@ export class SchoolSubscriptionDiscountsController {
 
   @Get()
   @ApiOperation({ summary: 'List all school subscription discounts' })
-  findAll(@Query() query: any) {
-    return this.schoolSubscriptionDiscountsService.findAll(query);
+  findAll(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('subscriptionId') subscriptionId?: string,
+    @Query('voucherId') voucherId?: string,
+    @Query('isActive') isActive?: string,
+  ) {
+    return this.schoolSubscriptionDiscountsService.findAll({
+      page,
+      limit,
+      subscriptionId,
+      voucherId,
+      isActive,
+    });
   }
 
   @Get(':id')

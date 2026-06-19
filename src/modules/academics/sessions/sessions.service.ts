@@ -24,6 +24,21 @@ export class SessionsService {
     });
   }
 
+  async findActiveList() {
+    const items = await this.prisma.academicSession.findMany({
+      where: { status: 'ACTIVE' },
+      orderBy: { year: 'desc' },
+    });
+
+    return {
+      success: true,
+      statusCode: 200,
+      message: 'Active sessions retrieved successfully',
+      data: items,
+      meta: null,
+    };
+  }
+
   async findAll() {
     const items = await this.prisma.academicSession.findMany({
       orderBy: { year: 'desc' },

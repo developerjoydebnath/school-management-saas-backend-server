@@ -4,6 +4,8 @@ import { ApiKeyModule } from './cores/api-key/api-key.module';
 import { TenantMiddleware } from './cores/user-context/tenant.middleware';
 import { SessionsModule } from './modules/academics/sessions/sessions.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { PermissionsModule } from './modules/permissions/permissions.module';
+import { RolesModule } from './modules/roles/roles.module';
 import { SchoolBankAccountsModule } from './modules/school-bank-accounts/school-bank-accounts.module';
 import { SchoolSubscriptionDiscountsModule } from './modules/school-subscription-discounts/school-subscription-discounts.module';
 import { SchoolSubscriptionsModule } from './modules/school-subscriptions/school-subscriptions.module';
@@ -18,6 +20,8 @@ import { VouchersModule } from './modules/vouchers/vouchers.module';
     ApiKeyModule,
     SessionsModule,
     SchoolsModule,
+    RolesModule,
+    PermissionsModule,
     SchoolBankAccountsModule,
     SchoolSubscriptionsModule,
     SchoolSubscriptionDiscountsModule,

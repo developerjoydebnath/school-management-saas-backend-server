@@ -388,6 +388,7 @@ model School {
   rejectedAt     DateTime? @map("rejected_at") @db.Timestamptz
   rejectedReason String?   @map("rejected_reason") @db.Text
 
+
   // ── Metadata ───────────────────────────────────────────────
   notes String? @db.Text
   // internal super admin notes about this school — not visible to school
@@ -412,6 +413,7 @@ model School {
   @@index([contactPhone])
   @@index([adminUserId])
   @@index([activeSubscriptionId])
+  @@index([schoolSlug])
   @@index([deletedAt])
   @@map("schools")
   @@schema("public")
@@ -543,10 +545,15 @@ model SubscriptionPlan {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
+  // ── Soft delete ──────────────────────────────────────────────
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz
+  deletedBy String?   @map("deleted_by") @db.Uuid
+
   subscriptions SchoolSubscription[]
 
   @@index([isPublic, isActive])
   @@index([slug])
+  @@index([deletedAt])
   @@map("subscription_plans")
   @@schema("public")
 }
@@ -624,6 +631,10 @@ model SchoolSubscription {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
+  // ── Soft delete ──────────────────────────────────────────────
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz
+  deletedBy String?   @map("deleted_by") @db.Uuid
+
   school    School                       @relation("AllSubscriptions", fields: [schoolId], references: [id], onDelete: Cascade)
   plan      SubscriptionPlan             @relation(fields: [planId], references: [id], onDelete: Restrict)
   activeFor School?                      @relation("ActiveSubscription")
@@ -634,6 +645,7 @@ model SchoolSubscription {
   @@index([status])
   @@index([expiresAt])
   // needed for cron that detects expiring subscriptions
+  @@index([deletedAt])
   @@map("school_subscriptions")
   @@schema("public")
 }
@@ -697,10 +709,15 @@ model Voucher {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
+  // ── Soft delete ──────────────────────────────────────────────
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz
+  deletedBy String?   @map("deleted_by") @db.Uuid
+
   redemptions SchoolSubscriptionDiscount[]
 
   @@index([code])
   @@index([isActive, expiresAt])
+  @@index([deletedAt])
   @@map("vouchers")
   @@schema("public")
 }
@@ -755,6 +772,10 @@ model SchoolSubscriptionDiscount {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
+  // ── Soft delete ──────────────────────────────────────────────
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz
+  deletedBy String?   @map("deleted_by") @db.Uuid
+
   subscription SchoolSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
   voucher      Voucher?           @relation(fields: [voucherId], references: [id], onDelete: SetNull)
 
@@ -762,6 +783,7 @@ model SchoolSubscriptionDiscount {
   @@index([voucherId])
   @@index([adjustmentType])
   @@index([isActive])
+  @@index([deletedAt])
   @@map("school_subscription_discounts")
   @@schema("public")
 }
@@ -852,4 +874,30 @@ model Union {
   @@index([upazilaId])
   @@map("unions")
   @@schema("public")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TENANT SCHEMA — isolated per school
+// ─────────────────────────────────────────────────────────────────────────────
+
+model TenantRole {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name        String   @db.VarChar(255)
+  description String?  @db.Text
+  permissions String[] // Array of permissionKey strings (e.g., ["academics.view", "academics.classes.all"])
+  isSystem    Boolean  @default(false) @map("is_system")
+  status      String   @default("ACTIVE") @db.VarChar(30)
+
+  // ── Timestamps ─────────────────────────────────────────────
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  // ── Soft delete ────────────────────────────────────────────
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz
+  deletedBy String?   @map("deleted_by") @db.Uuid
+
+  @@index([status])
+  @@index([deletedAt])
+  @@map("tenant_roles")
+  @@schema("tenant")
 }

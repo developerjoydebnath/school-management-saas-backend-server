@@ -1,10 +1,10 @@
+import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
-import { ApiKeyGuard } from './cores/api-key/guards/api-key.guard';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor';
-import { ValidationPipe } from '@nestjs/common';
+import { ApiKeyGuard } from './cores/api-key/guards/api-key.guard';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {

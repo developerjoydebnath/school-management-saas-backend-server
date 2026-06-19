@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { School, SchoolType } from '@prisma/client';
+import { softDelete } from '../../common/utils/soft-delete.extension';
 import { PrismaService } from '../../cores/prisma.service';
 import { CreateSchoolAdminDto } from './dto/create-school-admin.dto';
 import { CreateSchoolRequestDto } from './dto/create-school-request.dto';
@@ -36,9 +37,7 @@ export class SchoolsService {
    * Creates a school with status: 'pending'.
    * Super admin reviews later.
    */
-  async submitPublicRequest(
-    dto: CreateSchoolRequestDto,
-  ): Promise<{ message: string }> {
+  async submitPublicRequest(dto: CreateSchoolRequestDto) {
     const slug = await this.generateUniqueSlug(dto.schoolName);
 
     await this.prisma.school.create({
@@ -77,8 +76,12 @@ export class SchoolsService {
       );
 
     return {
+      success: true,
+      statusCode: 201,
       message:
         'Your request has been submitted successfully. Our team will review it within 2–3 business days.',
+      data: null,
+      meta: null,
     };
   }
 
@@ -88,10 +91,7 @@ export class SchoolsService {
    * Scenario B — super admin creates a school directly.
    * Inserts with status 'active' and immediately runs activation pipeline.
    */
-  async createByAdmin(
-    dto: CreateSchoolAdminDto,
-    adminId: string,
-  ): Promise<{ message: string; data: School }> {
+  async createByAdmin(dto: CreateSchoolAdminDto, adminId: string) {
     const slug = await this.generateUniqueSlug(dto.schoolName);
 
     // Insert first so we have an ID for the activation pipeline
@@ -128,18 +128,18 @@ export class SchoolsService {
     });
 
     return {
+      success: true,
+      statusCode: 201,
       message: `School "${dto.schoolName}" has been created and activated successfully.`,
       data: activated!,
+      meta: null,
     };
   }
 
   /**
    * Scenario A step 2 — super admin approves a pending request.
    */
-  async approveSchool(
-    id: string,
-    adminId: string,
-  ): Promise<{ message: string; data: School }> {
+  async approveSchool(id: string, adminId: string) {
     const school = await this.findOneOrFail(id);
 
     if (school.status !== 'pending') {
@@ -166,19 +166,18 @@ export class SchoolsService {
     });
 
     return {
+      success: true,
+      statusCode: 200,
       message: `School "${school.schoolName}" has been approved and activated.`,
       data: activated!,
+      meta: null,
     };
   }
 
   /**
    * Scenario C — super admin rejects a pending request.
    */
-  async rejectSchool(
-    id: string,
-    adminId: string,
-    reason?: string,
-  ): Promise<{ message: string }> {
+  async rejectSchool(id: string, adminId: string, reason?: string) {
     const school = await this.findOneOrFail(id);
 
     if (school.status !== 'pending') {
@@ -218,7 +217,13 @@ export class SchoolsService {
         this.logger.error('Rejection email failed:', err.message),
       );
 
-    return { message: `School "${school.schoolName}" has been rejected.` };
+    return {
+      success: true,
+      statusCode: 200,
+      message: `School "${school.schoolName}" has been rejected.`,
+      data: null,
+      meta: null,
+    };
   }
 
   /**
@@ -226,7 +231,7 @@ export class SchoolsService {
    * Deactivates all users in that schema — login fails for them.
    * Schema and data are untouched.
    */
-  async suspendSchool(id: string): Promise<{ message: string }> {
+  async suspendSchool(id: string) {
     const school = await this.findOneOrFail(id);
 
     if (school.status !== 'active') {
@@ -254,7 +259,11 @@ export class SchoolsService {
       `School "${school.schoolName}" suspended. All users deactivated.`,
     );
     return {
+      success: true,
+      statusCode: 200,
       message: `School "${school.schoolName}" has been suspended. All user access has been revoked.`,
+      data: null,
+      meta: null,
     };
   }
 
@@ -262,10 +271,7 @@ export class SchoolsService {
    * Scenario E — super admin reactivates a suspended school.
    * Re-enables all users. Schema was never touched.
    */
-  async reactivateSchool(
-    id: string,
-    adminId: string,
-  ): Promise<{ message: string }> {
+  async reactivateSchool(id: string, adminId: string) {
     const school = await this.findOneOrFail(id);
 
     if (school.status !== 'suspended') {
@@ -297,15 +303,17 @@ export class SchoolsService {
       `School "${school.schoolName}" reactivated by admin ${adminId}`,
     );
     return {
+      success: true,
+      statusCode: 200,
       message: `School "${school.schoolName}" has been reactivated. All user access restored.`,
+      data: null,
+      meta: null,
     };
   }
 
   // ─── Query methods ────────────────────────────────────────────────────────────
 
-  async findAll(query: SchoolListQuery): Promise<{
-    data: { items: School[]; meta: object };
-  }> {
+  async findAll(query: SchoolListQuery) {
     const page = query.page ?? 1;
     const limit = Math.min(query.limit ?? 20, 100);
     const skip = (page - 1) * limit;
@@ -328,6 +336,9 @@ export class SchoolsService {
     const totalPages = Math.ceil(total / limit);
 
     return {
+      success: true,
+      statusCode: 200,
+      message: 'Schools retrieved successfully',
       data: {
         items,
         meta: {
@@ -339,11 +350,31 @@ export class SchoolsService {
           hasPreviousPage: page > 1,
         },
       },
+      meta: null,
     };
   }
 
-  async findOne(id: string): Promise<School> {
-    return this.findOneOrFail(id);
+  async findOne(id: string) {
+    const school = await this.findOneOrFail(id);
+    return {
+      success: true,
+      statusCode: 200,
+      message: 'School retrieved successfully',
+      data: school,
+      meta: null,
+    };
+  }
+
+  async remove(id: string) {
+    await this.findOneOrFail(id);
+    await softDelete(this.prisma.raw.school, id);
+    return {
+      success: true,
+      statusCode: 200,
+      message: 'School deleted successfully',
+      data: null,
+      meta: null,
+    };
   }
 
   // ─── Internal helpers ─────────────────────────────────────────────────────────
