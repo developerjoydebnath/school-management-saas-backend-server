@@ -39,6 +39,14 @@ export class SubscriptionPlansService {
     if (query.isActive !== undefined) {
       where.isActive = query.isActive === 'true' || query.isActive === true;
     }
+    if (query.billingCycle) {
+      where.billingCycle = { in: query.billingCycle.split(',') };
+    }
+    if (query.isDeleted === 'true' || query.isDeleted === true) {
+      where.deletedAt = { not: null };
+    } else {
+      where.deletedAt = null;
+    }
 
     const [items, total] = await Promise.all([
       this.prisma.subscriptionPlan.findMany({
@@ -112,9 +120,9 @@ export class SubscriptionPlansService {
     };
   }
 
-  async remove(id: string) {
+  async remove(id: string, adminId?: string) {
     await this.findOne(id);
-    await softDelete(this.prisma.raw.subscriptionPlan, id);
+    await softDelete(this.prisma.subscriptionPlan, id, adminId);
     return {
       success: true,
       statusCode: 200,

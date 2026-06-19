@@ -30,6 +30,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
         if (Array.isArray(responseBody.message)) {
           message = 'Validation failed';
           errors = responseBody.message.map((msg: string) => ({
+            field: msg.split(' ')[0],
             message: msg,
           }));
         }

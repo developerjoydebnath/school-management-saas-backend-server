@@ -7,6 +7,7 @@ import {
   Patch,
   Post,
   Query,
+  Request,
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
@@ -41,12 +42,16 @@ export class SubscriptionPlansController {
     @Query('limit') limit?: string,
     @Query('isPublic') isPublic?: string,
     @Query('isActive') isActive?: string,
+    @Query('billingCycle') billingCycle?: string,
+    @Query('isDeleted') isDeleted?: string,
   ) {
     return this.subscriptionPlansService.findAll({
       page,
       limit,
       isPublic,
       isActive,
+      billingCycle,
+      isDeleted,
     });
   }
 
@@ -69,8 +74,8 @@ export class SubscriptionPlansController {
   @Delete(':id')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Delete a subscription plan' })
-  remove(@Param('id') id: string) {
-    return this.subscriptionPlansService.remove(id);
+  remove(@Param('id') id: string, @Request() req: any) {
+    return this.subscriptionPlansService.remove(id, req.user?.userId);
   }
 
   @Patch(':id/is-public')

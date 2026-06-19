@@ -37,7 +37,7 @@ export class SchoolSubscriptionsController {
   ) {
     return this.schoolSubscriptionsService.create(
       createSchoolSubscriptionDto,
-      req.user?.id,
+      req.user?.userId,
     );
   }
 
@@ -49,6 +49,7 @@ export class SchoolSubscriptionsController {
     @Query('status') status?: SubscriptionStatus,
     @Query('schoolId') schoolId?: string,
     @Query('planId') planId?: string,
+    @Query('isDeleted') isDeleted?: string,
   ) {
     return this.schoolSubscriptionsService.findAll({
       page,
@@ -56,6 +57,7 @@ export class SchoolSubscriptionsController {
       status,
       schoolId,
       planId,
+      isDeleted,
     });
   }
 
@@ -81,8 +83,8 @@ export class SchoolSubscriptionsController {
   @Delete(':id')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Delete a school subscription' })
-  remove(@Param('id') id: string) {
-    return this.schoolSubscriptionsService.remove(id);
+  remove(@Param('id') id: string, @Request() req: any) {
+    return this.schoolSubscriptionsService.remove(id, req.user?.userId);
   }
 
   @Patch(':id/status')
@@ -96,7 +98,7 @@ export class SchoolSubscriptionsController {
     return this.schoolSubscriptionsService.updateStatus(
       id,
       status,
-      req.user?.id,
+      req.user?.userId,
     );
   }
 }

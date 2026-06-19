@@ -118,9 +118,14 @@ export class UsersService {
 }
 
 // ❌ Wrong — never call this.prisma.user.findMany() directly
-// It bypasses the extension and may return deleted records
-return this.prisma.user.findMany();
+// It bypasses the extension and may return deleted records unless explicitly filtered
+return this.prisma.user.findMany({
+  // If you MUST use the raw client, you must manually hide deleted records:
+  where: { deletedAt: null } 
+});
 ```
+
+> **CRITICAL RULE**: All standard GET requests (`findMany`, `findAll`) must default to hiding soft-deleted data (`deletedAt = null`). Soft-deleted records are strictly meant for alternative views like an Archive or Recycle Bin, which can be fetched by passing an explicit `isDeleted=true` query param.
 
 ---
 

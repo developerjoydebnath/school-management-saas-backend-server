@@ -4,37 +4,29 @@ When handling list endpoints (e.g. `findAll`) that accept complex array query fi
 
 ## Controller Normalization
 
-Express and NestJS may parse query arrays differently based on whether one item or multiple items were selected (e.g. `?modules=student` vs `?modules=student&modules=teacher`).
+Express and NestJS may parse query arrays inconsistently based on URL formatting. For multi-option filters (e.g., selecting multiple billing cycles or modules), always expect the client to send a **comma-separated string** (e.g. `?billingCycle=monthly,annual`).
 
-Always type array query parameters as `string | string[]` and normalize them before passing to the service.
+In the Service layer, split the string by commas and apply the array filter to the Prisma query using `in` (for scalar fields) or `hasSome` (for arrays of strings/enums).
 
 ```typescript
 @Get()
 findAll(
   @Query('page') page: number = 1,
   @Query('limit') limit: number = 10,
-  @Query('modules') modules?: string | string[],
+  @Query('billingCycle') billingCycle?: string, // Comma-separated string
 ) {
-  const modulesArray = Array.isArray(modules)
-    ? modules
-    : modules
-      ? [modules]
-      : undefined;
-      
-  return this.service.findAll(page, limit, modulesArray);
+  return this.service.findAll(page, limit, billingCycle);
 }
 ```
 
 ## Prisma Array Filtering
 
-In the Service layer, apply the array filter to the Prisma query using `hasSome` (for arrays of strings/enums) or `in` (for scalar fields).
-
 ```typescript
-async findAll(page: number = 1, limit: number = 10, modules?: string[]) {
+async findAll(page: number = 1, limit: number = 10, billingCycle?: string) {
   const where: any = {};
   
-  if (modules && modules.length > 0) {
-    where.moduleName = { hasSome: modules };
+  if (billingCycle) {
+    where.billingCycle = { in: billingCycle.split(',') };
   }
 
   // ... execute prisma findMany

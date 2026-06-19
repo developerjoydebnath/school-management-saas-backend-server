@@ -41,6 +41,11 @@ export class SchoolSubscriptionsService {
     if (query.planId) {
       where.planId = query.planId;
     }
+    if (query.isDeleted === 'true' || query.isDeleted === true) {
+      where.deletedAt = { not: null };
+    } else {
+      where.deletedAt = null;
+    }
 
     const [items, total] = await Promise.all([
       this.prisma.schoolSubscription.findMany({
@@ -106,9 +111,9 @@ export class SchoolSubscriptionsService {
     };
   }
 
-  async remove(id: string) {
+  async remove(id: string, adminId?: string) {
     await this.findOne(id);
-    await softDelete(this.prisma.raw.schoolSubscription, id);
+    await softDelete(this.prisma.schoolSubscription, id, adminId);
     return {
       success: true,
       statusCode: 200,
