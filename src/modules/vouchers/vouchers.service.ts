@@ -45,8 +45,23 @@ export class VouchersService {
     const skip = (page - 1) * limit;
 
     const where: any = {};
-    if (query.isActive !== undefined) {
-      where.isActive = query.isActive === 'true' || query.isActive === true;
+    if (query.isActive !== undefined && query.isActive !== '') {
+      const activeArr = query.isActive.split(',');
+      if (activeArr.length === 1) {
+        where.isActive = activeArr[0] === 'true';
+      }
+    }
+
+    if (query.discountType) {
+      const discountTypeArr = query.discountType.split(',');
+      where.discountType = { in: discountTypeArr };
+    }
+
+    if (query.search) {
+      where.OR = [
+        { code: { contains: query.search, mode: 'insensitive' } },
+        { name: { contains: query.search, mode: 'insensitive' } },
+      ];
     }
 
     const [items, total] = await Promise.all([

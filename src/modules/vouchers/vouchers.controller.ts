@@ -39,8 +39,10 @@ export class VouchersController {
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @Query('isActive') isActive?: string,
+    @Query('search') search?: string,
+    @Query('discountType') discountType?: string,
   ) {
-    return this.vouchersService.findAll({ page, limit, isActive });
+    return this.vouchersService.findAll({ page, limit, isActive, search, discountType });
   }
 
   @Get(':id')
