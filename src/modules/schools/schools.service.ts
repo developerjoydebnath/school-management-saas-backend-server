@@ -1,14 +1,16 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { School, SchoolType } from '@prisma/client';
+import { Prisma, School, SchoolType } from '@prisma/client';
 import { softDelete } from '../../common/utils/soft-delete.extension';
 import { PrismaService } from '../../cores/prisma.service';
 import { CreateSchoolAdminDto } from './dto/create-school-admin.dto';
 import { CreateSchoolRequestDto } from './dto/create-school-request.dto';
+import { UpdateSchoolDto } from './dto/update-school.dto';
 import { SchoolsActivationService } from './schools.activation.service';
 import { SchoolsMigrationService } from './schools.migration.service';
 
@@ -16,8 +18,49 @@ export interface SchoolListQuery {
   status?: string;
   page?: number;
   limit?: number;
-  districtId?: number;
+  divisionId?: string;
+  districtId?: string;
+  upazilaId?: string;
   schoolType?: string;
+  affiliationBoard?: string;
+  medium?: string;
+  shift?: string;
+  createdFrom?: string;
+  createdTo?: string;
+}
+
+const SCHOOL_TYPE_ALIASES: Record<string, string> = {
+  school: 'school',
+  madrasa: 'madrasa',
+  madrasah: 'madrasa',
+  college: 'college',
+  university_college: 'university_college',
+};
+
+function parseCsv(value?: string): string[] {
+  if (!value) return [];
+  return value
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function parseNumberCsv(value?: string): number[] {
+  return parseCsv(value)
+    .map((item) => Number(item))
+    .filter((item) => Number.isInteger(item));
+}
+
+function parseDateFilter(value?: string, endOfDay = false) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    throw new BadRequestException(`Invalid created date filter: ${value}`);
+  }
+  if (endOfDay) {
+    date.setHours(23, 59, 59, 999);
+  }
+  return date;
 }
 
 @Injectable()
@@ -40,29 +83,61 @@ export class SchoolsService {
   async submitPublicRequest(dto: CreateSchoolRequestDto) {
     const slug = await this.generateUniqueSlug(dto.schoolName);
 
-    await this.prisma.school.create({
-      data: {
+    try {
+      await this.prisma.school.create({
+        data: {
         schoolName: dto.schoolName,
         schoolSlug: slug,
         schoolType: dto.schoolType as SchoolType,
         divisionId: dto.divisionId,
         districtId: dto.districtId,
         upazilaId: dto.upazilaId,
+        postCode: dto.postCode,
         contactEmail: dto.contactEmail,
         contactPhone: dto.contactPhone,
         address: dto.address,
+        latitude: dto.latitude,
+        longitude: dto.longitude,
         eiin: dto.eiin,
         registrationNo: dto.registrationNo,
         isCustomDomainEnabled: !!dto.customDomain,
         customDomain: dto.customDomain,
         notes: JSON.stringify({
           adminName: dto.adminName,
-          plan: dto.plan ?? 'standard',
         }),
+        schoolNameBn: dto.schoolNameBn,
+        alternatePhone: dto.alternatePhone,
+        website: dto.website,
+        mpoStatus: dto.mpoStatus,
+        banbeis: dto.banbeis,
+        establishedYear: dto.establishedYear,
+        governingBodyType: dto.governingBodyType,
+        recognitionStatus: dto.recognitionStatus,
+        recognizedBy: dto.recognizedBy,
+        affiliationBoard: dto.affiliationBoard,
+        affiliationNo: dto.affiliationNo,
+        medium: dto.medium ?? 'bangla',
+        educationLevel: dto.educationLevel ?? [],
+        shift: dto.shift ?? 'day',
+        hasHostel: dto.hasHostel,
+        hasPermanentCampus: dto.hasPermanentCampus,
+        hostelCapacity: dto.hostelCapacity,
+        headTeacherTitle: dto.headTeacherTitle,
+        totalRooms: dto.totalRooms,
+        totalStudentCapacity: dto.totalStudentCapacity,
+        facebookPage: dto.facebookPage,
+        youtubeChannel: dto.youtubeChannel,
         status: 'pending',
         createdBy: 'public',
+        logoUrl: dto.logoUrl,
+        logoPlaceholder: dto.logoPlaceholder,
+        bannerUrl: dto.bannerUrl,
+        bannerPlaceholder: dto.bannerPlaceholder,
       },
-    });
+      });
+    } catch (error) {
+      this.handleSchoolCreateError(error);
+    }
 
     this.logger.log(
       `Public request submitted for: ${dto.schoolName} (slug: ${slug})`,
@@ -95,43 +170,171 @@ export class SchoolsService {
     const slug = await this.generateUniqueSlug(dto.schoolName);
 
     // Insert first so we have an ID for the activation pipeline
-    const school = await this.prisma.school.create({
-      data: {
+    let school: School;
+    try {
+      school = await this.prisma.school.create({
+        data: {
         schoolName: dto.schoolName,
         schoolSlug: slug,
         schoolType: dto.schoolType as SchoolType,
         divisionId: dto.divisionId,
         districtId: dto.districtId,
         upazilaId: dto.upazilaId,
+        postCode: dto.postCode,
         contactEmail: dto.contactEmail,
         contactPhone: dto.contactPhone,
         address: dto.address,
+        latitude: dto.latitude,
+        longitude: dto.longitude,
         eiin: dto.eiin,
         registrationNo: dto.registrationNo,
         isCustomDomainEnabled: !!dto.customDomain,
         customDomain: dto.customDomain,
         notes: JSON.stringify({
           adminName: dto.adminName,
-          plan: dto.plan ?? 'standard',
         }),
-        status: 'pending', // will be updated to 'active' inside activateSchool
+        schoolNameBn: dto.schoolNameBn,
+        alternatePhone: dto.alternatePhone,
+        website: dto.website,
+        mpoStatus: dto.mpoStatus,
+        banbeis: dto.banbeis,
+        establishedYear: dto.establishedYear,
+        governingBodyType: dto.governingBodyType,
+        recognitionStatus: dto.recognitionStatus,
+        recognizedBy: dto.recognizedBy,
+        affiliationBoard: dto.affiliationBoard,
+        affiliationNo: dto.affiliationNo,
+        medium: dto.medium ?? 'bangla',
+        educationLevel: dto.educationLevel ?? [],
+        shift: dto.shift ?? 'day',
+        hasHostel: dto.hasHostel,
+        hasPermanentCampus: dto.hasPermanentCampus,
+        hostelCapacity: dto.hostelCapacity,
+        headTeacherTitle: dto.headTeacherTitle,
+        totalRooms: dto.totalRooms,
+        totalStudentCapacity: dto.totalStudentCapacity,
+        facebookPage: dto.facebookPage,
+        youtubeChannel: dto.youtubeChannel,
+        status: 'pending',
         createdBy: 'superadmin',
         createdById: adminId,
+        logoUrl: dto.logoUrl,
+        logoPlaceholder: dto.logoPlaceholder,
+        bannerUrl: dto.bannerUrl,
+        bannerPlaceholder: dto.bannerPlaceholder,
       },
-    });
-
-    // Run the activation pipeline immediately
-    await this.activationService.activateSchool(school, adminId, dto.adminName);
-
-    const activated = await this.prisma.school.findUnique({
-      where: { id: school.id },
-    });
+      });
+    } catch (error) {
+      this.handleSchoolCreateError(error);
+    }
 
     return {
       success: true,
       statusCode: 201,
-      message: `School "${dto.schoolName}" has been created and activated successfully.`,
-      data: activated!,
+      message: `School "${dto.schoolName}" has been created. Proceed to payment for activation.`,
+      data: school,
+      meta: null,
+    };
+  }
+
+  /**
+   * Generic school update (PATCH).
+   */
+  async updateSchool(id: string, dto: UpdateSchoolDto) {
+    const school = await this.findOneOrFail(id);
+
+    const updated = await this.prisma.school.update({
+      where: { id },
+      data: {
+        ...(dto.schoolName && { schoolName: dto.schoolName }),
+        ...(dto.schoolNameBn !== undefined && {
+          schoolNameBn: dto.schoolNameBn,
+        }),
+        ...(dto.schoolType && { schoolType: dto.schoolType as SchoolType }),
+        ...(dto.divisionId !== undefined && { divisionId: dto.divisionId }),
+        ...(dto.districtId !== undefined && { districtId: dto.districtId }),
+        ...(dto.upazilaId !== undefined && { upazilaId: dto.upazilaId }),
+        ...(dto.postCode !== undefined && { postCode: dto.postCode }),
+        ...(dto.address !== undefined && { address: dto.address }),
+        ...(dto.latitude !== undefined && { latitude: dto.latitude }),
+        ...(dto.longitude !== undefined && { longitude: dto.longitude }),
+        ...(dto.contactEmail && { contactEmail: dto.contactEmail }),
+        ...(dto.contactPhone && { contactPhone: dto.contactPhone }),
+        ...(dto.alternatePhone !== undefined && {
+          alternatePhone: dto.alternatePhone,
+        }),
+        ...(dto.website !== undefined && { website: dto.website }),
+        ...(dto.eiin !== undefined && { eiin: dto.eiin }),
+        ...(dto.registrationNo !== undefined && {
+          registrationNo: dto.registrationNo,
+        }),
+        ...(dto.mpoStatus !== undefined && { mpoStatus: dto.mpoStatus }),
+        ...(dto.banbeis !== undefined && { banbeis: dto.banbeis }),
+        ...(dto.establishedYear !== undefined && {
+          establishedYear: dto.establishedYear,
+        }),
+        ...(dto.governingBodyType !== undefined && {
+          governingBodyType: dto.governingBodyType,
+        }),
+        ...(dto.recognitionStatus !== undefined && {
+          recognitionStatus: dto.recognitionStatus,
+        }),
+        ...(dto.recognizedBy !== undefined && {
+          recognizedBy: dto.recognizedBy,
+        }),
+        ...(dto.affiliationBoard !== undefined && {
+          affiliationBoard: dto.affiliationBoard,
+        }),
+        ...(dto.affiliationNo !== undefined && {
+          affiliationNo: dto.affiliationNo,
+        }),
+        ...(dto.medium && { medium: dto.medium }),
+        ...(dto.educationLevel && { educationLevel: dto.educationLevel }),
+        ...(dto.shift && { shift: dto.shift }),
+        ...(dto.hasHostel !== undefined && { hasHostel: dto.hasHostel }),
+        ...(dto.hasPermanentCampus !== undefined && {
+          hasPermanentCampus: dto.hasPermanentCampus,
+        }),
+        ...(dto.hostelCapacity !== undefined && {
+          hostelCapacity: dto.hostelCapacity,
+        }),
+        ...(dto.headTeacherTitle !== undefined && {
+          headTeacherTitle: dto.headTeacherTitle,
+        }),
+        ...(dto.totalRooms !== undefined && { totalRooms: dto.totalRooms }),
+        ...(dto.totalStudentCapacity !== undefined && {
+          totalStudentCapacity: dto.totalStudentCapacity,
+        }),
+        ...(dto.facebookPage !== undefined && {
+          facebookPage: dto.facebookPage,
+        }),
+        ...(dto.youtubeChannel !== undefined && {
+          youtubeChannel: dto.youtubeChannel,
+        }),
+        ...(dto.isCustomDomainEnabled !== undefined && {
+          isCustomDomainEnabled: dto.isCustomDomainEnabled,
+        }),
+        ...(dto.customDomain !== undefined && {
+          customDomain: dto.customDomain,
+        }),
+        ...(dto.logoUrl !== undefined && { logoUrl: dto.logoUrl }),
+        ...(dto.logoPlaceholder !== undefined && {
+          logoPlaceholder: dto.logoPlaceholder,
+        }),
+        ...(dto.bannerUrl !== undefined && { bannerUrl: dto.bannerUrl }),
+        ...(dto.bannerPlaceholder !== undefined && {
+          bannerPlaceholder: dto.bannerPlaceholder,
+        }),
+      },
+    });
+
+    this.logger.log(`School "${school.schoolName}" (${id}) updated.`);
+
+    return {
+      success: true,
+      statusCode: 200,
+      message: 'School updated successfully',
+      data: updated,
       meta: null,
     };
   }
@@ -319,19 +522,81 @@ export class SchoolsService {
     const skip = (page - 1) * limit;
 
     const where: Record<string, any> = {};
-    if (query.status) where.status = query.status;
-    if (query.districtId) where.districtId = query.districtId;
-    if (query.schoolType) where.schoolType = query.schoolType as SchoolType;
+    const statuses = parseCsv(query.status);
+    if (statuses.length === 1) where.status = statuses[0];
+    if (statuses.length > 1) where.status = { in: statuses };
+    const divisionIds = parseNumberCsv(query.divisionId);
+    if (divisionIds.length === 1) where.divisionId = divisionIds[0];
+    if (divisionIds.length > 1) where.divisionId = { in: divisionIds };
+    const districtIds = parseNumberCsv(query.districtId);
+    if (districtIds.length === 1) where.districtId = districtIds[0];
+    if (districtIds.length > 1) where.districtId = { in: districtIds };
+    const upazilaIds = parseNumberCsv(query.upazilaId);
+    if (upazilaIds.length === 1) where.upazilaId = upazilaIds[0];
+    if (upazilaIds.length > 1) where.upazilaId = { in: upazilaIds };
+    const schoolTypes = parseCsv(query.schoolType).map((type) => {
+      const normalized = SCHOOL_TYPE_ALIASES[type];
+      if (!normalized) {
+        throw new BadRequestException(`Invalid school type filter: ${type}`);
+      }
+      return normalized as SchoolType;
+    });
+    if (schoolTypes.length === 1) where.schoolType = schoolTypes[0];
+    if (schoolTypes.length > 1) where.schoolType = { in: schoolTypes };
+    const affiliationBoards = parseCsv(query.affiliationBoard);
+    if (affiliationBoards.length === 1) where.affiliationBoard = affiliationBoards[0];
+    if (affiliationBoards.length > 1) where.affiliationBoard = { in: affiliationBoards };
+    const mediums = parseCsv(query.medium);
+    if (mediums.length === 1) where.medium = mediums[0];
+    if (mediums.length > 1) where.medium = { in: mediums };
+    const shifts = parseCsv(query.shift);
+    if (shifts.length === 1) where.shift = shifts[0];
+    if (shifts.length > 1) where.shift = { in: shifts };
+    const createdFrom = parseDateFilter(query.createdFrom);
+    const createdTo = parseDateFilter(query.createdTo, true);
+    if (createdFrom || createdTo) {
+      where.createdAt = {
+        ...(createdFrom ? { gte: createdFrom } : {}),
+        ...(createdTo ? { lte: createdTo } : {}),
+      };
+    }
 
     const [items, total] = await Promise.all([
       this.prisma.school.findMany({
         where,
+        include: {
+          adminUser: {
+            select: {
+              id: true,
+              email: true,
+              phone: true,
+              profile: {
+                select: {
+                  firstName: true,
+                  lastName: true,
+                },
+              },
+            },
+          },
+        },
         orderBy: { createdAt: 'desc' },
         skip,
         take: limit,
       }),
       this.prisma.school.count({ where }),
     ]);
+
+    const schools = items.map((school) => {
+      const profile = school.adminUser?.profile;
+      const contactPersonName = profile
+        ? `${profile.firstName} ${profile.lastName}`.trim()
+        : null;
+
+      return {
+        ...school,
+        contactPersonName,
+      };
+    });
 
     const totalPages = Math.ceil(total / limit);
 
@@ -340,7 +605,7 @@ export class SchoolsService {
       statusCode: 200,
       message: 'Schools retrieved successfully',
       data: {
-        items,
+        items: schools,
         meta: {
           page,
           limit,
@@ -355,12 +620,63 @@ export class SchoolsService {
   }
 
   async findOne(id: string) {
-    const school = await this.findOneOrFail(id);
+    const school = await this.prisma.school.findUnique({
+      where: { id },
+      include: {
+        payments: {
+          include: {
+            subscription: {
+              include: {
+                plan: true,
+              },
+            },
+          },
+        },
+        division: true,
+        district: true,
+        upazila: true,
+        bankAccounts: {
+          where: { deletedAt: null },
+          orderBy: [{ isPrimary: 'desc' }, { createdAt: 'desc' }],
+        },
+        adminUser: {
+          include: {
+            profile: true,
+          },
+        },
+      },
+    });
+
+    if (!school) {
+      throw new NotFoundException(`School with ID "${id}" not found.`);
+    }
+
+    // Since `subscriptions` isn't directly listed in `School` model in Prisma (only payments),
+    // we fetch active subscription manually if needed, but if it is in School we could include it.
+    // Let's also fetch subscriptions manually to be safe.
+    const subscriptions = await this.prisma.schoolSubscription.findMany({
+      where: { schoolId: id },
+      orderBy: { startsAt: 'desc' },
+      include: { plan: true },
+    });
+
+    const schoolData = {
+      ...school,
+      subscriptions,
+    };
+
+    if (schoolData.adminUser) {
+      delete (schoolData.adminUser as any).password;
+      delete (schoolData.adminUser as any).resetOtp;
+      delete (schoolData.adminUser as any).resetOtpExpires;
+      delete (schoolData.adminUser as any).hashedRefreshToken;
+    }
+
     return {
       success: true,
       statusCode: 200,
       message: 'School retrieved successfully',
-      data: school,
+      data: schoolData,
       meta: null,
     };
   }
@@ -411,5 +727,28 @@ export class SchoolsService {
       slug = `${base}-${counter}`;
       counter++;
     }
+  }
+
+  private handleSchoolCreateError(error: unknown): never {
+    if (error instanceof Prisma.PrismaClientKnownRequestError) {
+      if (error.code === 'P2002') {
+        const target = Array.isArray(error.meta?.target)
+          ? error.meta.target.join(', ')
+          : 'unique field';
+        throw new ConflictException(`A school already exists with this ${target}.`);
+      }
+
+      if (error.code === 'P2003') {
+        throw new BadRequestException(
+          'Invalid related data. Please check division, district, upazila, or referenced IDs.',
+        );
+      }
+
+      if (error.code === 'P2000') {
+        throw new BadRequestException('One or more fields are too long.');
+      }
+    }
+
+    throw error;
   }
 }

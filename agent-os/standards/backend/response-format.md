@@ -61,3 +61,5 @@ async findAll(page: number = 1, limit: number = 10, search?: string) {
     };
 }
 ```
+
+The `meta.limit` and `meta.page` values must reflect the effective pagination values used by `skip` and `take`. Do not hardcode metadata such as `limit: 100` when the request supplied another limit like `?limit=10`.

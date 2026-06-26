@@ -5,6 +5,9 @@ import * as crypto from 'crypto';
 import * as nodemailer from 'nodemailer';
 import { PrismaService } from '../../cores/prisma.service';
 import { SchoolsMigrationService } from './schools.migration.service';
+import { getWelcomeEmailTemplate } from './templates/welcome-email.template';
+import { getRejectionEmailTemplate } from './templates/rejection-email.template';
+import { getConfirmationEmailTemplate } from './templates/confirmation-email.template';
 
 @Injectable()
 export class SchoolsActivationService {
@@ -32,6 +35,7 @@ export class SchoolsActivationService {
     school: School,
     adminId: string,
     adminName: string,
+    existingTx?: Parameters<Parameters<PrismaService['$transaction']>[0]>[0],
   ): Promise<void> {
     this.logger.log(
       `Starting activation pipeline for school: ${school.schoolSlug} (ID: ${school.id})`,
@@ -40,38 +44,42 @@ export class SchoolsActivationService {
     const tempPassword = this.generateTempPassword();
     let createdUserId: string | null = null;
 
-    await this.prisma.$transaction(
-      async (tx) => {
-        // Step 1 — Create PostgreSQL schema
-        await this.migrationService.createTenantSchema(tx, school.schoolSlug);
+    const runActivation = async (
+      tx: Parameters<Parameters<PrismaService['$transaction']>[0]>[0],
+    ) => {
+      // Step 1 — Create PostgreSQL schema
+      await this.migrationService.createTenantSchema(tx, school.schoolSlug);
 
-        // Step 2 — Clone table structure from tenant_template
-        await this.migrationService.cloneTenantTables(tx, school.schoolSlug);
+      // Step 2 — Clone table structure from tenant_template
+      await this.migrationService.cloneTenantTables(tx, school.schoolSlug);
 
-        // Step 3 — Create school admin user
-        createdUserId = await this.createSchoolAdminUser(
-          tx,
-          school,
-          adminName,
-          tempPassword,
-        );
+      // Step 3 — Create school admin user
+      createdUserId = await this.createSchoolAdminUser(
+        tx,
+        school,
+        adminName,
+        tempPassword,
+      );
 
-        // Step 4 — Mark school as active
-        await tx.school.update({
-          where: { id: school.id },
-          data: {
-            status: 'active',
-            activatedAt: new Date(),
-            activatedBy: adminId,
-            adminUserId: createdUserId,
-          },
-        });
-      },
-      {
-        // Schema creation + migrations can take a few seconds
+      // Step 4 — Mark school as active
+      await tx.school.update({
+        where: { id: school.id },
+        data: {
+          status: 'active',
+          activatedAt: new Date(),
+          activatedBy: adminId,
+          adminUserId: createdUserId,
+        },
+      });
+    };
+
+    if (existingTx) {
+      await runActivation(existingTx);
+    } else {
+      await this.prisma.$transaction(runActivation, {
         timeout: 30000,
-      },
-    );
+      });
+    }
 
     this.logger.log(
       `Activation transaction complete for: ${school.schoolSlug}`,
@@ -100,10 +108,6 @@ export class SchoolsActivationService {
       `  Creating school admin user in public.users (email: ${school.contactEmail})`,
     );
 
-    const names = adminName.split(' ');
-    const firstName = names[0];
-    const lastName = names.length > 1 ? names.slice(1).join(' ') : '';
-
     // Insert into global public.users table via Prisma
     const user = await tx.user.create({
       data: {
@@ -129,11 +133,10 @@ export class SchoolsActivationService {
 
     if (profileExists[0]?.exists) {
       await tx.$executeRawUnsafe(
-        `INSERT INTO "${schema}".user_profiles (user_id, first_name, last_name, phone)
-         VALUES ($1::uuid, $2, $3, $4)`,
+        `INSERT INTO "${schema}".user_profiles (user_id, full_name, phone)
+         VALUES ($1::uuid, $2, $3)`,
         user.id,
-        firstName,
-        lastName,
+        adminName,
         school.contactPhone,
       );
       this.logger.log(
@@ -141,9 +144,24 @@ export class SchoolsActivationService {
       );
     } else {
       this.logger.warn(
-        `  Table "${schema}".user_profiles not found — profile not created.`,
+        `  Table "${schema}".user_profiles not found — profile not created in tenant schema.`,
       );
     }
+
+    // Also create the profile in the public schema
+    const nameParts = adminName.trim().split(' ');
+    const firstName = nameParts[0] || 'Admin';
+    const lastName = nameParts.slice(1).join(' ') || '';
+
+    await tx.userProfile.create({
+      data: {
+        userId: user.id,
+        firstName,
+        lastName,
+        phone: school.contactPhone,
+      },
+    });
+    this.logger.log(`  School admin profile created in public.user_profiles`);
 
     return user.id;
   }
@@ -184,21 +202,12 @@ export class SchoolsActivationService {
       from: `"EduCore" <${process.env.SMTP_USER}>`,
       to: school.contactEmail,
       subject: `Welcome to EduCore — Your school is ready!`,
-      html: `
-        <div style="font-family: sans-serif; max-width: 600px; margin: auto;">
-          <h2>Welcome to EduCore, ${school.schoolName}! 🎉</h2>
-          <p>Your school account has been successfully set up.</p>
-          <hr />
-          <h3>Login Details</h3>
-          <p><strong>URL:</strong> <a href="https://${subdomain}">https://${subdomain}</a></p>
-          <p><strong>Email:</strong> ${school.contactEmail}</p>
-          <p><strong>Temporary Password:</strong> <code>${tempPassword}</code></p>
-          <p style="color: #e53e3e;">⚠️ Please change your password immediately after first login.</p>
-          <hr />
-          <p>If you have any questions, reply to this email.</p>
-          <p>— The EduCore Team</p>
-        </div>
-      `,
+      html: getWelcomeEmailTemplate(
+        school.schoolName,
+        subdomain,
+        school.contactEmail,
+        tempPassword,
+      ),
     });
 
     this.logger.log(`Welcome email sent to: ${school.contactEmail}`);
@@ -214,16 +223,7 @@ export class SchoolsActivationService {
       from: `"EduCore" <${process.env.SMTP_USER}>`,
       to: school.contactEmail,
       subject: `Update on your EduCore application — ${school.schoolName}`,
-      html: `
-        <div style="font-family: sans-serif; max-width: 600px; margin: auto;">
-          <h2>Application Update</h2>
-          <p>Dear ${adminName},</p>
-          <p>We have reviewed your application for <strong>${school.schoolName}</strong> and unfortunately we are unable to approve it at this time.</p>
-          ${reason ? `<p><strong>Reason:</strong> ${reason}</p>` : ''}
-          <p>You may re-apply after addressing the stated concerns. If you believe this is an error, please contact our support team.</p>
-          <p>— The EduCore Team</p>
-        </div>
-      `,
+      html: getRejectionEmailTemplate(school.schoolName, adminName, reason),
     });
   }
 
@@ -237,15 +237,7 @@ export class SchoolsActivationService {
       from: `"EduCore" <${process.env.SMTP_USER}>`,
       to: contactEmail,
       subject: `We received your application — ${schoolName}`,
-      html: `
-        <div style="font-family: sans-serif; max-width: 600px; margin: auto;">
-          <h2>Application Received ✅</h2>
-          <p>Dear ${adminName},</p>
-          <p>Thank you for applying to join <strong>EduCore</strong>. We have received your request for <strong>${schoolName}</strong>.</p>
-          <p>Our team will review your application and get back to you within 2–3 business days.</p>
-          <p>— The EduCore Team</p>
-        </div>
-      `,
+      html: getConfirmationEmailTemplate(schoolName, adminName),
     });
   }
 }

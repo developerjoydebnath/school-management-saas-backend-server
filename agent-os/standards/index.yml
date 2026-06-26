@@ -16,3 +16,5 @@ backend:
     description: "Response Formatting and Module Definitions: Enforces standard pagination objects with `items` and `meta` (page, limit, totalPages), and requires modules to import/provide `PrismaService` and `TenantConnectionService` directly."
   filter:
     description: "List Filtering and Pagination Queries: Define complex array query parameters as `@Query('paramName') paramName?: string | string[]`, normalize them, and use `hasSome` or `in` Prisma filters."
+  media-and-uploads:
+    description: "Media and Uploads: Serve static assets via app.useStaticAssets(join(process.cwd(), 'public')), handle file uploads using Multer, and store url/placeholder strings directly on Prisma entities for 1-to-1 images."

@@ -38,8 +38,8 @@ export class GlobalExceptionFilter implements ExceptionFilter {
         message = exception.message;
       }
     } else {
-      // For unhandled exceptions like database errors
-      message = exception?.message || message;
+      // Do not expose raw database/runtime errors to API clients.
+      message = 'Internal Server Error';
     }
 
     response.status(status).json({

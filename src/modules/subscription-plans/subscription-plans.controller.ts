@@ -43,6 +43,8 @@ export class SubscriptionPlansController {
     @Query('isPublic') isPublic?: string,
     @Query('isActive') isActive?: string,
     @Query('billingCycle') billingCycle?: string,
+    @Query('createdFrom') createdFrom?: string,
+    @Query('createdTo') createdTo?: string,
     @Query('isDeleted') isDeleted?: string,
   ) {
     return this.subscriptionPlansService.findAll({
@@ -51,8 +53,16 @@ export class SubscriptionPlansController {
       isPublic,
       isActive,
       billingCycle,
+      createdFrom,
+      createdTo,
       isDeleted,
     });
+  }
+
+  @Get('list')
+  @ApiOperation({ summary: 'Get a lightweight list of active public subscription plans' })
+  getList() {
+    return this.subscriptionPlansService.getList();
   }
 
   @Get(':id')

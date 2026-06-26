@@ -24,6 +24,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { CreateSchoolAdminDto } from './dto/create-school-admin.dto';
 import { RejectSchoolDto } from './dto/update-school-status.dto';
+import { UpdateSchoolDto } from './dto/update-school.dto';
 import { SchoolsService } from './schools.service';
 
 /**
@@ -58,23 +59,44 @@ export class SchoolsController {
   @Get()
   @ApiOperation({ summary: 'List all school requests (filterable)' })
   @ApiQuery({ name: 'status', required: false, example: 'pending' })
-  @ApiQuery({ name: 'districtId', required: false, example: 47 })
-  @ApiQuery({ name: 'schoolType', required: false, example: 'bangla_medium' })
+  @ApiQuery({ name: 'divisionId', required: false, example: '3' })
+  @ApiQuery({ name: 'districtId', required: false, example: '47' })
+  @ApiQuery({ name: 'upazilaId', required: false, example: '10' })
+  @ApiQuery({ name: 'schoolType', required: false, example: 'school,college' })
+  @ApiQuery({ name: 'affiliationBoard', required: false, example: 'dhaka_board' })
+  @ApiQuery({ name: 'medium', required: false, example: 'bangla,english' })
+  @ApiQuery({ name: 'shift', required: false, example: 'day,morning' })
+  @ApiQuery({ name: 'createdFrom', required: false, example: '2026-06-01' })
+  @ApiQuery({ name: 'createdTo', required: false, example: '2026-06-30' })
   @ApiQuery({ name: 'page', required: false, example: 1 })
   @ApiQuery({ name: 'limit', required: false, example: 20 })
   async findAll(
     @Request() req: any,
     @Query('status') status?: string,
+    @Query('divisionId') divisionId?: string,
     @Query('districtId') districtId?: string,
+    @Query('upazilaId') upazilaId?: string,
     @Query('schoolType') schoolType?: string,
+    @Query('affiliationBoard') affiliationBoard?: string,
+    @Query('medium') medium?: string,
+    @Query('shift') shift?: string,
+    @Query('createdFrom') createdFrom?: string,
+    @Query('createdTo') createdTo?: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
   ) {
     this.assertSuperAdmin(req);
     return this.schoolsService.findAll({
       status,
-      districtId: districtId ? parseInt(districtId, 10) : undefined,
+      divisionId,
+      districtId,
+      upazilaId,
       schoolType,
+      affiliationBoard,
+      medium,
+      shift,
+      createdFrom,
+      createdTo,
       page: page ? parseInt(page, 10) : undefined,
       limit: limit ? parseInt(limit, 10) : undefined,
     });
@@ -102,6 +124,21 @@ export class SchoolsController {
   async createByAdmin(@Request() req: any, @Body() dto: CreateSchoolAdminDto) {
     this.assertSuperAdmin(req);
     return this.schoolsService.createByAdmin(dto, req.user.userId);
+  }
+
+  /**
+   * PATCH /superadmin/schools/:id
+   * Generic update of a school's details.
+   */
+  @Patch(':id')
+  @ApiOperation({ summary: 'Update school details' })
+  async update(
+    @Request() req: any,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateSchoolDto,
+  ) {
+    this.assertSuperAdmin(req);
+    return this.schoolsService.updateSchool(id, dto);
   }
 
   // ─── Status transitions ───────────────────────────────────────────────────────

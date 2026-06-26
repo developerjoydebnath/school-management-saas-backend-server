@@ -7,7 +7,7 @@ const prisma = new PrismaClient();
 async function main() {
   console.log('Seeding locations data...');
 
-  const dataPath = path.join(__dirname, 'seeders', 'locations-data.json');
+  const dataPath = path.join(__dirname, 'seeders', 'updated-locations.json');
   if (!fs.existsSync(dataPath)) {
     console.error(`Location data not found at ${dataPath}`);
     process.exit(1);
@@ -19,6 +19,13 @@ async function main() {
   console.log(
     `Loaded ${data.divisions.length} divisions, ${data.districts.length} districts, ${data.upazilas.length} upazilas, ${data.unions.length} unions.`,
   );
+
+  console.log('Clearing existing locations data...');
+  // Delete in reverse order to respect foreign key constraints
+  await prisma.union.deleteMany();
+  await prisma.upazila.deleteMany();
+  await prisma.district.deleteMany();
+  await prisma.division.deleteMany();
 
   console.log('Inserting Divisions...');
   await prisma.division.createMany({
@@ -47,7 +54,15 @@ async function main() {
       `  Inserted unions ${i + chunk.length}/${data.unions.length}\r`,
     );
   }
-  console.log('\nLocation seeding completed successfully.');
+  console.log('\nResetting PostgreSQL auto-increment sequences...');
+
+  // Update sequences to Max ID + 1 so new inserts don't collide with seeded IDs
+  await prisma.$executeRaw`SELECT setval(pg_get_serial_sequence('public.divisions', 'id'), COALESCE((SELECT MAX(id)+1 FROM public.divisions), 1), false);`;
+  await prisma.$executeRaw`SELECT setval(pg_get_serial_sequence('public.districts', 'id'), COALESCE((SELECT MAX(id)+1 FROM public.districts), 1), false);`;
+  await prisma.$executeRaw`SELECT setval(pg_get_serial_sequence('public.upazilas', 'id'), COALESCE((SELECT MAX(id)+1 FROM public.upazilas), 1), false);`;
+  await prisma.$executeRaw`SELECT setval(pg_get_serial_sequence('public.unions', 'id'), COALESCE((SELECT MAX(id)+1 FROM public.unions), 1), false);`;
+
+  console.log('Location seeding completed successfully.');
 }
 
 main()

@@ -41,6 +41,7 @@ export const SOFT_DELETE_MODELS: Prisma.ModelName[] = [
   'Voucher',
   'SchoolSubscription',
   'SchoolSubscriptionDiscount',
+  'Shift',
 ];
 
 // ─── Query categories ────────────────────────────────────────────────────────

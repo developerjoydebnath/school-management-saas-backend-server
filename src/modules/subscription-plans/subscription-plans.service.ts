@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { softDelete } from '../../common/utils/soft-delete.extension';
 import { PrismaService } from '../../cores/prisma.service';
 import { CreateSubscriptionPlanDto } from './dto/create-subscription-plan.dto';
@@ -7,6 +7,18 @@ import { UpdateSubscriptionPlanDto } from './dto/update-subscription-plan.dto';
 @Injectable()
 export class SubscriptionPlansService {
   constructor(private readonly prisma: PrismaService) {}
+
+  private parseCreatedDateFilter(value?: string, endOfDay = false) {
+    if (!value) return null;
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      throw new BadRequestException(`Invalid created date filter: ${value}`);
+    }
+    if (endOfDay) {
+      date.setHours(23, 59, 59, 999);
+    }
+    return date;
+  }
 
   async create(createDto: CreateSubscriptionPlanDto) {
     const slug = await this.generateUniqueSlug(createDto.name);
@@ -42,6 +54,14 @@ export class SubscriptionPlansService {
     if (query.billingCycle) {
       where.billingCycle = { in: query.billingCycle.split(',') };
     }
+    const createdFrom = this.parseCreatedDateFilter(query.createdFrom);
+    const createdTo = this.parseCreatedDateFilter(query.createdTo, true);
+    if (createdFrom || createdTo) {
+      where.createdAt = {
+        ...(createdFrom ? { gte: createdFrom } : {}),
+        ...(createdTo ? { lte: createdTo } : {}),
+      };
+    }
     if (query.isDeleted === 'true' || query.isDeleted === true) {
       where.deletedAt = { not: null };
     } else {
@@ -75,6 +95,29 @@ export class SubscriptionPlansService {
           hasPreviousPage: page > 1,
         },
       },
+      meta: null,
+    };
+  }
+
+  async getList() {
+    const items = await this.prisma.subscriptionPlan.findMany({
+      where: {
+        isActive: true,
+        isPublic: true,
+        deletedAt: null,
+      },
+      select: {
+        id: true,
+        name: true,
+      },
+      orderBy: { sortOrder: 'asc' },
+    });
+
+    return {
+      success: true,
+      statusCode: 200,
+      message: 'Subscription plans list retrieved successfully',
+      data: items,
       meta: null,
     };
   }

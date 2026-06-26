@@ -39,10 +39,31 @@ export class SessionsService {
     };
   }
 
-  async findAll() {
-    const items = await this.prisma.academicSession.findMany({
-      orderBy: { year: 'desc' },
-    });
+  async findAll(page: string | number = 1, limit: string | number = 10, search?: string) {
+    const pageNumber = Math.max(Number(page) || 1, 1);
+    const limitNumber = Math.max(Number(limit) || 10, 1);
+    const where = search
+      ? {
+          OR: [
+            { name: { contains: search, mode: 'insensitive' as const } },
+            ...(Number.isNaN(Number(search))
+              ? []
+              : [{ year: Number(search) }]),
+          ],
+        }
+      : {};
+
+    const [items, total] = await Promise.all([
+      this.prisma.academicSession.findMany({
+        where,
+        skip: (pageNumber - 1) * limitNumber,
+        take: limitNumber,
+        orderBy: { year: 'desc' },
+      }),
+      this.prisma.academicSession.count({ where }),
+    ]);
+
+    const totalPages = Math.ceil(total / limitNumber);
 
     return {
       success: true,
@@ -51,12 +72,12 @@ export class SessionsService {
       data: {
         items,
         meta: {
-          page: 1,
-          limit: 100,
-          total: items.length,
-          totalPages: 1,
-          hasNextPage: false,
-          hasPreviousPage: false,
+          page: pageNumber,
+          limit: limitNumber,
+          total,
+          totalPages,
+          hasNextPage: pageNumber < totalPages,
+          hasPreviousPage: pageNumber > 1,
         },
       },
       meta: null,

@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { PERMISSIONS } from 'src/common/constants/permissions';
@@ -35,8 +36,12 @@ export class SessionsController {
 
   @Get()
   @RequirePermissions(PERMISSIONS.SESSIONS.VIEW, PERMISSIONS.SESSIONS.ALL)
-  findAll() {
-    return this.sessionsService.findAll();
+  findAll(
+    @Query('page') page: string = '1',
+    @Query('limit') limit: string = '10',
+    @Query('search') search?: string,
+  ) {
+    return this.sessionsService.findAll(page, limit, search);
   }
 
   @Get(':id')

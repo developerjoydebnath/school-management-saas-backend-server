@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
@@ -11,6 +12,18 @@ import { UpdateVoucherDto } from './dto/update-voucher.dto';
 @Injectable()
 export class VouchersService {
   constructor(private readonly prisma: PrismaService) {}
+
+  private parseCreatedDateFilter(value?: string, endOfDay = false) {
+    if (!value) return null;
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      throw new BadRequestException(`Invalid created date filter: ${value}`);
+    }
+    if (endOfDay) {
+      date.setHours(23, 59, 59, 999);
+    }
+    return date;
+  }
 
   async create(createDto: CreateVoucherDto, adminId?: string) {
     const existing = await this.prisma.voucher.findUnique({
@@ -55,6 +68,14 @@ export class VouchersService {
     if (query.discountType) {
       const discountTypeArr = query.discountType.split(',');
       where.discountType = { in: discountTypeArr };
+    }
+    const createdFrom = this.parseCreatedDateFilter(query.createdFrom);
+    const createdTo = this.parseCreatedDateFilter(query.createdTo, true);
+    if (createdFrom || createdTo) {
+      where.createdAt = {
+        ...(createdFrom ? { gte: createdFrom } : {}),
+        ...(createdTo ? { lte: createdTo } : {}),
+      };
     }
 
     if (query.search) {

@@ -1,9 +1,17 @@
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { ScheduleModule } from '@nestjs/schedule';
 import { ApiKeyModule } from './cores/api-key/api-key.module';
 import { TenantMiddleware } from './cores/user-context/tenant.middleware';
+import { MediaModule } from './media/media.module';
+import { ClassRoomsModule } from './modules/academics/class-rooms/class-rooms.module';
+import { ClassesModule } from './modules/academics/classes/classes.module';
 import { SessionsModule } from './modules/academics/sessions/sessions.module';
+import { ShiftsModule } from './modules/academics/shifts/shifts.module';
+import { SubjectsModule } from './modules/academics/subjects/subjects.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { LocationsModule } from './modules/locations/locations.module';
+import { PaymentsModule } from './modules/payments/payments.module';
 import { PermissionsModule } from './modules/permissions/permissions.module';
 import { RolesModule } from './modules/roles/roles.module';
 import { SchoolBankAccountsModule } from './modules/school-bank-accounts/school-bank-accounts.module';
@@ -19,6 +27,10 @@ import { VouchersModule } from './modules/vouchers/vouchers.module';
     AuthModule,
     ApiKeyModule,
     SessionsModule,
+    ClassRoomsModule,
+    ClassesModule,
+    SubjectsModule,
+    ShiftsModule,
     SchoolsModule,
     RolesModule,
     PermissionsModule,
@@ -27,6 +39,10 @@ import { VouchersModule } from './modules/vouchers/vouchers.module';
     SchoolSubscriptionDiscountsModule,
     SubscriptionPlansModule,
     VouchersModule,
+    LocationsModule,
+    PaymentsModule,
+    ScheduleModule.forRoot(),
+    MediaModule,
   ],
   controllers: [],
   providers: [],

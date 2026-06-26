@@ -18,6 +18,6 @@ import { SchoolsService } from './schools.service';
     PrismaService,
     TenantConnectionService,
   ],
-  exports: [SchoolsService],
+  exports: [SchoolsService, SchoolsActivationService],
 })
 export class SchoolsModule {}

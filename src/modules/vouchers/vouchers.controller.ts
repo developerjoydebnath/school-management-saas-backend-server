@@ -41,8 +41,18 @@ export class VouchersController {
     @Query('isActive') isActive?: string,
     @Query('search') search?: string,
     @Query('discountType') discountType?: string,
+    @Query('createdFrom') createdFrom?: string,
+    @Query('createdTo') createdTo?: string,
   ) {
-    return this.vouchersService.findAll({ page, limit, isActive, search, discountType });
+    return this.vouchersService.findAll({
+      page,
+      limit,
+      isActive,
+      search,
+      discountType,
+      createdFrom,
+      createdTo,
+    });
   }
 
   @Get(':id')

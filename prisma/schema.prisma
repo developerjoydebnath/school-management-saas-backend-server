@@ -30,8 +30,7 @@ enum Role {
 }
 
 enum SchoolType {
-  bangla_medium
-  english_medium
+  school
   madrasa
   college
   university_college
@@ -80,6 +79,25 @@ enum DiscountAdjustmentType {
   manual
   // super admin applied a direct adjustment without a voucher code
   // e.g. compensation for downtime, loyalty reward, NGO deal
+
+  @@schema("public")
+}
+
+enum PaymentStatus {
+  pending
+  completed
+  failed
+  refunded
+
+  @@schema("public")
+}
+
+enum PaymentMethod {
+  cash
+  bank_transfer
+  credit_card
+  mobile_banking
+  other
 
   @@schema("public")
 }
@@ -153,12 +171,13 @@ model UserProfile {
   gender             String?   @db.VarChar(50)
   dob                DateTime? @db.Timestamptz
   bloodGroup         String?   @map("blood_group") @db.VarChar(10)
-  religion           String?   @db.VarChar(50)
-  nationality        String?   @db.VarChar(100)
+  religion           String?   @map("religion") @db.VarChar(50)
+  nationality        String?   @map("nationality") @db.VarChar(100)
   nidNo              String?   @map("nid_no") @db.VarChar(50)
   birthCertificateNo String?   @map("brith_certificate_no") @db.VarChar(50)
   phone              String?   @db.VarChar(20)
   photoUrl           String?   @map("photo_url") @db.VarChar(500)
+  photoPlaceholder   String?   @map("photo_placeholder") @db.Text
 
   presentDivisionId  Int?    @map("present_division_id")
   presentDistrictId  Int?    @map("present_district_id")
@@ -204,6 +223,60 @@ model UserProfile {
   @@schema("public")
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GLOBAL MEDIA TABLE
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Media {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  fileName     String @map("file_name") @db.VarChar(255)
+  originalName String @map("original_name") @db.VarChar(255)
+
+  path     String @map("path") @db.VarChar(500)
+  // relative path, e.g. "/uploads/school_logo/dhaka_model/a1b2c3.webp"
+  provider String @default("local") @map("provider") @db.VarChar(20)
+  // local | r2 | s3 — lets us swap storage later with zero schema change
+
+  mimeType String @map("mime_type") @db.VarChar(100)
+  fileSize Int    @map("file_size")
+  width    Int?
+  height   Int?
+
+  fileHash String @unique @map("file_hash") @db.VarChar(64)
+  // SHA-256 hash — the deduplication key
+
+  thumbnailPath String? @map("thumbnail_path") @db.VarChar(500)
+  mediumPath    String? @map("medium_path") @db.VarChar(500)
+  placeholder   String? @db.Text
+  // base64 tiny blurred version, stored inline (~300-600 bytes)
+
+  schemaName String? @map("schema_name") @db.VarChar(63)
+  // which school/tenant this belongs to — null for global/super-admin uploads
+  uploadedBy String? @map("uploaded_by") @db.Uuid
+  module     String  @map("module") @db.VarChar(50)
+  // 'school_logo' | 'student_photo' | 'staff_document' | 'certificate' etc.
+  entityType String? @map("entity_type") @db.VarChar(50)
+  entityId   String? @map("entity_id") @db.Uuid
+
+  isPublic       Boolean @default(true) @map("is_public")
+  referenceCount Int     @default(1) @map("reference_count")
+
+  isDeleted Boolean   @default(false) @map("is_deleted")
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@index([fileHash])
+  @@index([schemaName])
+  @@index([module])
+  @@index([entityType, entityId])
+  @@index([isDeleted])
+  @@map("media")
+  @@schema("public")
+}
+
 model Permission {
   id             Int      @id @default(autoincrement())
   permissionName String   @map("permission_name") @db.VarChar(255)
@@ -242,7 +315,7 @@ model School {
   schoolName String     @map("school_name") @db.VarChar(255)
   schoolSlug String     @unique @map("school_slug") @db.VarChar(63)
   schoolType SchoolType @map("school_type")
-  // bangla_medium | english_medium | madrasa | college | university_college
+  // school | madrasa | college | university_college
 
   schoolNameBn String? @map("school_name_bn") @db.VarChar(255)
   // Bengali name — needed for Bengali report cards, certificates, official documents
@@ -342,9 +415,11 @@ model School {
   // storing a name here creates data duplication and sync issues
 
   // ── Branding ───────────────────────────────────────────────
-  logoUrl   String? @map("logo_url") @db.VarChar(500)
+  logoUrl           String? @map("logo_url") @db.VarChar(500)
+  logoPlaceholder   String? @map("logo_placeholder") @db.Text
   // stored in Cloudflare R2 — set after activation
-  bannerUrl String? @map("banner_url") @db.VarChar(500)
+  bannerUrl         String? @map("banner_url") @db.VarChar(500)
+  bannerPlaceholder String? @map("banner_placeholder") @db.Text
   // optional banner for school portal landing page
 
   // ── Subscription ────────────────────────────────────────────
@@ -388,7 +463,6 @@ model School {
   rejectedAt     DateTime? @map("rejected_at") @db.Timestamptz
   rejectedReason String?   @map("rejected_reason") @db.Text
 
-
   // ── Metadata ───────────────────────────────────────────────
   notes String? @db.Text
   // internal super admin notes about this school — not visible to school
@@ -405,6 +479,7 @@ model School {
   // super admin who performed the soft delete
 
   bankAccounts SchoolBankAccount[]
+  payments     Payment[]
 
   // ── Indexes ────────────────────────────────────────────────
   @@index([status])
@@ -639,6 +714,7 @@ model SchoolSubscription {
   plan      SubscriptionPlan             @relation(fields: [planId], references: [id], onDelete: Restrict)
   activeFor School?                      @relation("ActiveSubscription")
   discounts SchoolSubscriptionDiscount[]
+  payments  Payment[]
 
   @@index([schoolId])
   @@index([planId])
@@ -788,6 +864,38 @@ model SchoolSubscriptionDiscount {
   @@schema("public")
 }
 
+/// ─────────────────────────────────────────────────────────────────────────────
+/// PAYMENTS
+/// ─────────────────────────────────────────────────────────────────────────────
+model Payment {
+  id             String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  schoolId       String        @map("school_id") @db.Uuid
+  subscriptionId String?       @map("subscription_id") @db.Uuid
+  transactionId  String?       @unique @map("transaction_id") @db.VarChar(255)
+  invoiceId      String?       @unique @map("invoice_id") @db.VarChar(255)
+  amount         Decimal       @db.Decimal(12, 2)
+  currency       String        @default("BDT") @db.VarChar(3)
+  status         PaymentStatus @default(pending)
+  method         PaymentMethod
+  paidAt         DateTime?     @map("paid_at") @db.Timestamptz
+  notes          String?       @db.Text
+  metadata       Json?
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  school       School              @relation(fields: [schoolId], references: [id], onDelete: Restrict)
+  subscription SchoolSubscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+
+  @@index([schoolId])
+  @@index([subscriptionId])
+  @@index([transactionId])
+  @@index([invoiceId])
+  @@index([status])
+  @@map("payments")
+  @@schema("public")
+}
+
 model AcademicSession {
   id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   name      String   @db.VarChar(255)
@@ -802,8 +910,8 @@ model AcademicSession {
 }
 
 model Division {
-  id     Int    @id
-  // ID from official BD government dataset (1–8). No autoincrement — IDs are fixed.
+  id     Int    @id @default(autoincrement())
+  // ID from official BD government dataset (1-8). Now autoincrement for future additions.
   bnName String @map("bn_name") @db.VarChar(255)
   enName String @map("en_name") @db.VarChar(255)
 
@@ -817,8 +925,8 @@ model Division {
 }
 
 model District {
-  id         Int     @id
-  // ID from official BD government dataset. No autoincrement — IDs are fixed.
+  id         Int     @id @default(autoincrement())
+  // ID from official BD government dataset. Now autoincrement for future additions.
   divisionId Int     @map("pid")
   // pid = parent division id
   bnName     String  @map("bn_name") @db.VarChar(255)
@@ -837,8 +945,8 @@ model District {
 }
 
 model Upazila {
-  id         Int     @id
-  // ID from official BD government dataset. No autoincrement — IDs are fixed.
+  id         Int     @id @default(autoincrement())
+  // ID from official BD government dataset. Now autoincrement for future additions.
   districtId Int     @map("pid")
   // pid = parent district id
   bnName     String  @map("bn_name") @db.VarChar(255)
@@ -857,8 +965,8 @@ model Upazila {
 }
 
 model Union {
-  id        Int     @id
-  // ID from official BD government dataset. No autoincrement — IDs are fixed.
+  id        Int     @id @default(autoincrement())
+  // ID from official BD government dataset. Now autoincrement for future additions.
   upazilaId Int     @map("pid")
   // pid = parent upazila id
   areaType  String? @map("area_type") @db.VarChar(50)
@@ -899,5 +1007,195 @@ model TenantRole {
   @@index([status])
   @@index([deletedAt])
   @@map("tenant_roles")
+  @@schema("tenant")
+}
+
+model Shift {
+  id        String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name      String @db.VarChar(255)
+  startTime String @map("start_time") @db.VarChar(50)
+  endTime   String @map("end_time") @db.VarChar(50)
+  status    String @default("ACTIVE") @db.VarChar(50)
+
+  // ── Timestamps ─────────────────────────────────────────────
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  // ── Soft delete ────────────────────────────────────────────
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz
+  deletedBy String?   @map("deleted_by") @db.Uuid
+
+  classes  Class[]
+  sections Section[]
+
+  @@index([status])
+  @@index([deletedAt])
+  @@map("shifts")
+  @@schema("tenant")
+}
+
+model Class {
+  id          String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  enName      String  @map("en_name") @db.VarChar(255)
+  bnName      String? @map("bn_name") @db.VarChar(255)
+  classRoomId String? @map("class_room_id") @db.Uuid
+  shiftId     String? @map("shift_id") @db.Uuid
+  status      String  @default("ACTIVE") @db.VarChar(50)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz
+  deletedBy String?   @map("deleted_by") @db.Uuid
+
+  classRoom ClassRoom? @relation(fields: [classRoomId], references: [id], onDelete: SetNull)
+  shift     Shift?     @relation(fields: [shiftId], references: [id], onDelete: SetNull)
+  sections  Section[]
+  subjects  SubjectClass[]
+
+  @@index([classRoomId])
+  @@index([shiftId])
+  @@index([status])
+  @@index([deletedAt])
+  @@map("classes")
+  @@schema("tenant")
+}
+
+enum SubjectType {
+  MANDATORY
+  OPTIONAL
+  PRACTICAL
+  FOURTH_SUBJECT
+  RELIGION
+  GROUP_BASED
+
+  @@schema("tenant")
+}
+
+enum SubjectMarkDivision {
+  WRITTEN
+  WRITTEN_MCQ
+  WRITTEN_MCQ_PRACTICAL
+
+  @@schema("tenant")
+}
+
+model Subject {
+  id             String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  enName         String      @map("en_name") @db.VarChar(255)
+  bnName         String?     @map("bn_name") @db.VarChar(255)
+  code           String?     @db.VarChar(50)
+  boardCode      String?     @map("board_code") @db.VarChar(50)
+  type           SubjectType @default(MANDATORY)
+  group          String?     @db.VarChar(50)
+  paperCount     Int         @default(1) @map("paper_count")
+  fullMarks      Int         @default(100) @map("full_marks")
+  passMarks      Int         @default(33) @map("pass_marks")
+  markDivision   SubjectMarkDivision @default(WRITTEN) @map("mark_division")
+  writtenMarks   Int?        @map("written_marks")
+  writtenPassMarks Int?      @map("written_pass_marks")
+  mcqMarks       Int?        @map("mcq_marks")
+  mcqPassMarks   Int?        @map("mcq_pass_marks")
+  practicalMarks Int?        @map("practical_marks")
+  practicalPassMarks Int?    @map("practical_pass_marks")
+  theoryMarks    Int?        @map("theory_marks")
+  sortOrder      Int         @default(0) @map("sort_order")
+  status         String      @default("ACTIVE") @db.VarChar(50)
+  description    String?     @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz
+  deletedBy String?   @map("deleted_by") @db.Uuid
+
+  classes SubjectClass[]
+
+  @@index([code])
+  @@index([type])
+  @@index([markDivision])
+  @@index([group])
+  @@index([status])
+  @@index([deletedAt])
+  @@map("subjects")
+  @@schema("tenant")
+}
+
+model SubjectClass {
+  id        String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  subjectId String @map("subject_id") @db.Uuid
+  classId   String @map("class_id") @db.Uuid
+
+  subject Subject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  class   Class   @relation(fields: [classId], references: [id], onDelete: Restrict)
+
+  @@unique([subjectId, classId])
+  @@index([subjectId])
+  @@index([classId])
+  @@map("subject_classes")
+  @@schema("tenant")
+}
+
+model Section {
+  id          String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  classId     String @map("class_id") @db.Uuid
+  name        String @db.VarChar(100)
+  classRoomId String @map("class_room_id") @db.Uuid
+  shiftId     String @map("shift_id") @db.Uuid
+  status      String @default("ACTIVE") @db.VarChar(50)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz
+  deletedBy String?   @map("deleted_by") @db.Uuid
+
+  class     Class     @relation(fields: [classId], references: [id], onDelete: Cascade)
+  classRoom ClassRoom @relation(fields: [classRoomId], references: [id], onDelete: Restrict)
+  shift     Shift     @relation(fields: [shiftId], references: [id], onDelete: Restrict)
+
+  @@index([classId])
+  @@index([classId, name])
+  @@index([classRoomId])
+  @@index([shiftId])
+  @@index([status])
+  @@index([deletedAt])
+  @@map("sections")
+  @@schema("tenant")
+}
+
+model ClassRoom {
+  id          String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name        String  @db.VarChar(255)
+  roomNo      String  @map("room_no") @db.VarChar(50)
+  capacity    Int
+  floor       String? @db.VarChar(50)
+  building    String? @db.VarChar(100)
+  highBench   Int     @default(0) @map("high_bench")
+  lowBench    Int     @default(0) @map("low_bench")
+  chair       Int     @default(0)
+  table       Int     @default(0)
+  board       Int     @default(0)
+  projector   Int     @default(0)
+  fan         Int     @default(0)
+  light       Int     @default(0)
+  hasAc       Boolean @default(false) @map("has_ac")
+  hasCctv     Boolean @default(false) @map("has_cctv")
+  status      String  @default("ACTIVE") @db.VarChar(50)
+  description String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz
+  deletedBy String?   @map("deleted_by") @db.Uuid
+
+  classes  Class[]
+  sections Section[]
+
+  @@index([roomNo])
+  @@index([status])
+  @@index([deletedAt])
+  @@map("class_rooms")
   @@schema("tenant")
 }
