@@ -1,6 +1,7 @@
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
+
 import { ApiKeyModule } from './cores/api-key/api-key.module';
 import { TenantMiddleware } from './cores/user-context/tenant.middleware';
 import { MediaModule } from './media/media.module';
@@ -19,6 +20,8 @@ import { SchoolSubscriptionDiscountsModule } from './modules/school-subscription
 import { SchoolSubscriptionsModule } from './modules/school-subscriptions/school-subscriptions.module';
 import { SchoolsModule } from './modules/schools/schools.module';
 import { SubscriptionPlansModule } from './modules/subscription-plans/subscription-plans.module';
+import { DepartmentsModule } from './modules/staff/departments/departments.module';
+import { DesignationsModule } from './modules/staff/designations/designations.module';
 import { VouchersModule } from './modules/vouchers/vouchers.module';
 
 @Module({
@@ -43,6 +46,8 @@ import { VouchersModule } from './modules/vouchers/vouchers.module';
     PaymentsModule,
     ScheduleModule.forRoot(),
     MediaModule,
+    DesignationsModule,
+    DepartmentsModule,
   ],
   controllers: [],
   providers: [],

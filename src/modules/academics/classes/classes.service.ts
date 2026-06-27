@@ -23,6 +23,62 @@ export class ClassesService {
     };
   }
 
+  private getListSelect() {
+    return {
+      id: true,
+      enName: true,
+      bnName: true,
+      status: true,
+      classRoomId: true,
+      shiftId: true,
+      classRoom: {
+        select: {
+          id: true,
+          roomNo: true,
+          capacity: true,
+        },
+      },
+      shift: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
+      sections: {
+        where: { deletedAt: null },
+        select: {
+          id: true,
+          name: true,
+          classRoomId: true,
+          shiftId: true,
+          classRoom: {
+            select: {
+              id: true,
+              roomNo: true,
+              capacity: true,
+            },
+          },
+          shift: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+        },
+        orderBy: { name: 'asc' as const },
+      },
+    };
+  }
+
+  private getActiveListSelect() {
+    return {
+      id: true,
+      enName: true,
+      bnName: true,
+      status: true,
+    };
+  }
+
   private normalizeStatus(status?: string) {
     return status?.toUpperCase() === 'INACTIVE' ? 'INACTIVE' : 'ACTIVE';
   }
@@ -169,7 +225,7 @@ export class ClassesService {
     const prisma = this.tenantConnection.getTenantClient();
     const items = await prisma.class.findMany({
       where: { status: 'ACTIVE', deletedAt: null },
-      include: this.getInclude(),
+      select: this.getActiveListSelect(),
       orderBy: { enName: 'asc' },
     });
 
@@ -238,7 +294,7 @@ export class ClassesService {
         where,
         skip: (page - 1) * limit,
         take: limit,
-        include: this.getInclude(),
+        select: this.getListSelect(),
         orderBy: { enName: 'asc' },
       }),
       prisma.class.count({ where }),

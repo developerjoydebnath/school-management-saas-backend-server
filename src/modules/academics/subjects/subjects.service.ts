@@ -5,7 +5,11 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { TenantConnectionService } from 'src/cores/prisma.service';
-import { CreateSubjectDto, UpdateSubjectDto } from './dto/subject.dto';
+import {
+  CreateSubjectDto,
+  SubjectMarkDivisionEnum,
+  UpdateSubjectDto,
+} from './dto/subject.dto';
 
 @Injectable()
 export class SubjectsService {
@@ -27,6 +31,43 @@ export class SubjectsService {
     };
   }
 
+  private getListSelect() {
+    return {
+      id: true,
+      enName: true,
+      bnName: true,
+      code: true,
+      type: true,
+      group: true,
+      fullMarks: true,
+      passMarks: true,
+      markDivision: true,
+      status: true,
+      classes: {
+        select: {
+          class: {
+            select: {
+              id: true,
+              enName: true,
+              bnName: true,
+            },
+          },
+        },
+        orderBy: { class: { enName: 'asc' as const } },
+      },
+    };
+  }
+
+  private getActiveListSelect() {
+    return {
+      id: true,
+      enName: true,
+      bnName: true,
+      code: true,
+      status: true,
+    };
+  }
+
   private normalizeStatus(status?: string) {
     return status?.toUpperCase() === 'INACTIVE' ? 'INACTIVE' : 'ACTIVE';
   }
@@ -42,7 +83,8 @@ export class SubjectsService {
   }
 
   private mapSubject(subject: any) {
-    const classItems = subject.classes?.map((item: any) => item.class).filter(Boolean) || [];
+    const classItems =
+      subject.classes?.map((item: any) => item.class).filter(Boolean) || [];
 
     return {
       ...subject,
@@ -75,15 +117,18 @@ export class SubjectsService {
       select: { id: true },
     });
     if (classes.length !== new Set(classIds).size) {
-      throw new BadRequestException('One or more assigned classes were not found');
+      throw new BadRequestException(
+        'One or more assigned classes were not found',
+      );
     }
   }
 
   private mapData(dto: CreateSubjectDto | UpdateSubjectDto) {
     const hasMcq =
-      dto.markDivision === 'WRITTEN_MCQ' ||
-      dto.markDivision === 'WRITTEN_MCQ_PRACTICAL';
-    const hasPractical = dto.markDivision === 'WRITTEN_MCQ_PRACTICAL';
+      dto.markDivision === SubjectMarkDivisionEnum.WRITTEN_MCQ ||
+      dto.markDivision === SubjectMarkDivisionEnum.WRITTEN_MCQ_PRACTICAL;
+    const hasPractical =
+      dto.markDivision === SubjectMarkDivisionEnum.WRITTEN_MCQ_PRACTICAL;
 
     return {
       ...(dto.enName !== undefined ? { enName: dto.enName } : {}),
@@ -93,17 +138,25 @@ export class SubjectsService {
         ? { boardCode: this.normalizeCode(dto.boardCode) }
         : {}),
       ...(dto.type !== undefined ? { type: dto.type } : {}),
-      ...(dto.group !== undefined ? { group: this.normalizeGroup(dto.group) } : {}),
+      ...(dto.group !== undefined
+        ? { group: this.normalizeGroup(dto.group) }
+        : {}),
       ...(dto.paperCount !== undefined ? { paperCount: dto.paperCount } : {}),
       ...(dto.fullMarks !== undefined ? { fullMarks: dto.fullMarks } : {}),
       ...(dto.passMarks !== undefined ? { passMarks: dto.passMarks } : {}),
-      ...(dto.markDivision !== undefined ? { markDivision: dto.markDivision } : {}),
-      ...(dto.writtenMarks !== undefined ? { writtenMarks: dto.writtenMarks } : {}),
+      ...(dto.markDivision !== undefined
+        ? { markDivision: dto.markDivision }
+        : {}),
+      ...(dto.writtenMarks !== undefined
+        ? { writtenMarks: dto.writtenMarks }
+        : {}),
       ...(dto.writtenPassMarks !== undefined
         ? { writtenPassMarks: dto.writtenPassMarks }
         : {}),
       ...(dto.mcqMarks !== undefined ? { mcqMarks: dto.mcqMarks } : {}),
-      ...(dto.mcqPassMarks !== undefined ? { mcqPassMarks: dto.mcqPassMarks } : {}),
+      ...(dto.mcqPassMarks !== undefined
+        ? { mcqPassMarks: dto.mcqPassMarks }
+        : {}),
       ...(dto.practicalMarks !== undefined
         ? { practicalMarks: dto.practicalMarks }
         : {}),
@@ -116,37 +169,53 @@ export class SubjectsService {
       ...(dto.markDivision !== undefined && !hasPractical
         ? { practicalMarks: 0, practicalPassMarks: 0 }
         : {}),
-      ...(dto.theoryMarks !== undefined ? { theoryMarks: dto.theoryMarks } : {}),
+      ...(dto.theoryMarks !== undefined
+        ? { theoryMarks: dto.theoryMarks }
+        : {}),
       ...(dto.sortOrder !== undefined ? { sortOrder: dto.sortOrder } : {}),
-      ...(dto.status !== undefined ? { status: this.normalizeStatus(dto.status) } : {}),
-      ...(dto.description !== undefined ? { description: dto.description || null } : {}),
+      ...(dto.status !== undefined
+        ? { status: this.normalizeStatus(dto.status) }
+        : {}),
+      ...(dto.description !== undefined
+        ? { description: dto.description || null }
+        : {}),
     };
   }
 
-  private validateMarkBreakdown(dto: CreateSubjectDto | UpdateSubjectDto, existing?: any) {
-    const markDivision = dto.markDivision ?? existing?.markDivision ?? 'WRITTEN';
+  private validateMarkBreakdown(
+    dto: CreateSubjectDto | UpdateSubjectDto,
+    existing?: any,
+  ) {
+    const markDivision =
+      dto.markDivision ?? existing?.markDivision ?? 'WRITTEN';
     const fullMarks = dto.fullMarks ?? existing?.fullMarks ?? 100;
     const passMarks = dto.passMarks ?? existing?.passMarks ?? 33;
     const writtenMarks =
-      dto.writtenMarks ?? existing?.writtenMarks ?? dto.theoryMarks ?? existing?.theoryMarks ?? fullMarks;
+      dto.writtenMarks ??
+      existing?.writtenMarks ??
+      dto.theoryMarks ??
+      existing?.theoryMarks ??
+      fullMarks;
     const writtenPassMarks =
       dto.writtenPassMarks ?? existing?.writtenPassMarks ?? passMarks;
     const hasMcq =
       markDivision === 'WRITTEN_MCQ' ||
       markDivision === 'WRITTEN_MCQ_PRACTICAL';
     const hasPractical = markDivision === 'WRITTEN_MCQ_PRACTICAL';
-    const mcqMarks = hasMcq ? dto.mcqMarks ?? existing?.mcqMarks ?? 0 : 0;
+    const mcqMarks = hasMcq ? (dto.mcqMarks ?? existing?.mcqMarks ?? 0) : 0;
     const mcqPassMarks = hasMcq
-      ? dto.mcqPassMarks ?? existing?.mcqPassMarks ?? 0
+      ? (dto.mcqPassMarks ?? existing?.mcqPassMarks ?? 0)
       : 0;
     const practicalMarks = hasPractical
-      ? dto.practicalMarks ?? existing?.practicalMarks ?? 0
+      ? (dto.practicalMarks ?? existing?.practicalMarks ?? 0)
       : 0;
     const practicalPassMarks = hasPractical
-      ? dto.practicalPassMarks ?? existing?.practicalPassMarks ?? 0
+      ? (dto.practicalPassMarks ?? existing?.practicalPassMarks ?? 0)
       : 0;
     const totalPartMarks =
-      writtenMarks + (hasMcq ? mcqMarks : 0) + (hasPractical ? practicalMarks : 0);
+      writtenMarks +
+      (hasMcq ? mcqMarks : 0) +
+      (hasPractical ? practicalMarks : 0);
     const totalPartPassMarks =
       writtenPassMarks +
       (hasMcq ? mcqPassMarks : 0) +
@@ -156,16 +225,22 @@ export class SubjectsService {
       throw new BadRequestException('Written marks must be greater than zero');
     }
     if (writtenPassMarks > writtenMarks) {
-      throw new BadRequestException('Written pass marks cannot exceed written marks');
+      throw new BadRequestException(
+        'Written pass marks cannot exceed written marks',
+      );
     }
     if (hasMcq && mcqMarks <= 0) {
-      throw new BadRequestException('MCQ marks are required for this mark division');
+      throw new BadRequestException(
+        'MCQ marks are required for this mark division',
+      );
     }
     if (hasMcq && mcqPassMarks > mcqMarks) {
       throw new BadRequestException('MCQ pass marks cannot exceed MCQ marks');
     }
     if (hasPractical && practicalMarks <= 0) {
-      throw new BadRequestException('Practical marks are required for this mark division');
+      throw new BadRequestException(
+        'Practical marks are required for this mark division',
+      );
     }
     if (hasPractical && practicalPassMarks > practicalMarks) {
       throw new BadRequestException(
@@ -210,34 +285,34 @@ export class SubjectsService {
     this.validateMarkBreakdown(dto);
 
     const data: any = {
-        enName: dto.enName,
-        bnName: dto.bnName || null,
-        code,
-        boardCode: this.normalizeCode(dto.boardCode),
-        type: dto.type || 'MANDATORY',
-        group: this.normalizeGroup(dto.group),
-        paperCount: dto.paperCount ?? 1,
-        fullMarks: dto.fullMarks ?? 100,
-        passMarks: dto.passMarks ?? 33,
-        markDivision: dto.markDivision ?? 'WRITTEN',
-        writtenMarks: dto.writtenMarks ?? dto.theoryMarks ?? dto.fullMarks ?? 100,
-        writtenPassMarks: dto.writtenPassMarks ?? dto.passMarks ?? 33,
-        mcqMarks: dto.mcqMarks ?? 0,
-        mcqPassMarks: dto.mcqPassMarks ?? 0,
-        practicalMarks: dto.practicalMarks ?? null,
-        practicalPassMarks: dto.practicalPassMarks ?? 0,
-        theoryMarks: dto.theoryMarks ?? null,
-        sortOrder: dto.sortOrder ?? 0,
-        status: this.normalizeStatus(dto.status),
-        description: dto.description || null,
-        ...(dto.classIds?.length
-          ? {
-              classes: {
-                create: dto.classIds.map((classId) => ({ classId })),
-              },
-            }
-          : {}),
-      };
+      enName: dto.enName,
+      bnName: dto.bnName || null,
+      code,
+      boardCode: this.normalizeCode(dto.boardCode),
+      type: dto.type || 'MANDATORY',
+      group: this.normalizeGroup(dto.group),
+      paperCount: dto.paperCount ?? 1,
+      fullMarks: dto.fullMarks ?? 100,
+      passMarks: dto.passMarks ?? 33,
+      markDivision: dto.markDivision ?? 'WRITTEN',
+      writtenMarks: dto.writtenMarks ?? dto.theoryMarks ?? dto.fullMarks ?? 100,
+      writtenPassMarks: dto.writtenPassMarks ?? dto.passMarks ?? 33,
+      mcqMarks: dto.mcqMarks ?? 0,
+      mcqPassMarks: dto.mcqPassMarks ?? 0,
+      practicalMarks: dto.practicalMarks ?? null,
+      practicalPassMarks: dto.practicalPassMarks ?? 0,
+      theoryMarks: dto.theoryMarks ?? null,
+      sortOrder: dto.sortOrder ?? 0,
+      status: this.normalizeStatus(dto.status),
+      description: dto.description || null,
+      ...(dto.classIds?.length
+        ? {
+            classes: {
+              create: dto.classIds.map((classId) => ({ classId })),
+            },
+          }
+        : {}),
+    };
 
     const subject = await prisma.subject.create({
       data,
@@ -257,7 +332,7 @@ export class SubjectsService {
     const prisma = this.tenantConnection.getTenantClient();
     const items = await prisma.subject.findMany({
       where: { status: 'ACTIVE', deletedAt: null },
-      include: this.getInclude(),
+      select: this.getActiveListSelect(),
       orderBy: [{ sortOrder: 'asc' }, { enName: 'asc' }],
     });
 
@@ -265,7 +340,7 @@ export class SubjectsService {
       success: true,
       statusCode: 200,
       message: 'Active subjects retrieved successfully',
-      data: items.map((item) => this.mapSubject(item)),
+      data: items,
       meta: null,
     };
   }
@@ -334,7 +409,7 @@ export class SubjectsService {
         where,
         skip: (page - 1) * limit,
         take: limit,
-        include: this.getInclude(),
+        select: this.getListSelect(),
         orderBy: [{ sortOrder: 'asc' }, { enName: 'asc' }],
       }),
       prisma.subject.count({ where }),

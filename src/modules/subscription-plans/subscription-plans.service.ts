@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { softDelete } from '../../common/utils/soft-delete.extension';
 import { PrismaService } from '../../cores/prisma.service';
 import { CreateSubscriptionPlanDto } from './dto/create-subscription-plan.dto';
@@ -74,6 +78,16 @@ export class SubscriptionPlansService {
         orderBy: { sortOrder: 'asc' },
         skip,
         take: limit,
+        select: {
+          id: true,
+          name: true,
+          priceBdt: true,
+          billingCycle: true,
+          maxStudents: true,
+          maxStaff: true,
+          isPublic: true,
+          isActive: true,
+        },
       }),
       this.prisma.subscriptionPlan.count({ where }),
     ]);

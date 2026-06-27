@@ -52,6 +52,32 @@ export class ClassRoomsService {
     };
   }
 
+  private getListSelect() {
+    return {
+      id: true,
+      name: true,
+      roomNo: true,
+      capacity: true,
+      floor: true,
+      building: true,
+      highBench: true,
+      lowBench: true,
+      chair: true,
+      table: true,
+      status: true,
+    };
+  }
+
+  private getActiveListSelect() {
+    return {
+      id: true,
+      name: true,
+      roomNo: true,
+      capacity: true,
+      status: true,
+    };
+  }
+
   async create(dto: CreateClassRoomDto) {
     const prisma = this.tenantConnection.getTenantClient();
     await this.assertUniqueRoomNo(dto.roomNo);
@@ -83,6 +109,7 @@ export class ClassRoomsService {
     const prisma = this.tenantConnection.getTenantClient();
     const items = await prisma.classRoom.findMany({
       where: { status: 'ACTIVE', deletedAt: null },
+      select: this.getActiveListSelect(),
       orderBy: [{ roomNo: 'asc' }, { name: 'asc' }],
     });
 
@@ -123,6 +150,7 @@ export class ClassRoomsService {
         where,
         skip: (page - 1) * limit,
         take: limit,
+        select: this.getListSelect(),
         orderBy: [{ roomNo: 'asc' }, { name: 'asc' }],
       }),
       prisma.classRoom.count({ where }),

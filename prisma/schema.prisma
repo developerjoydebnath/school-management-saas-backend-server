@@ -919,6 +919,7 @@ model Division {
   schools               School[]
   userProfilesPresent   UserProfile[] @relation("UserProfilePresentDivision")
   userProfilesPermanent UserProfile[] @relation("UserProfilePermanentDivision")
+  teachers              Teacher[]
 
   @@map("divisions")
   @@schema("public")
@@ -938,6 +939,7 @@ model District {
   schools               School[]
   userProfilesPresent   UserProfile[] @relation("UserProfilePresentDistrict")
   userProfilesPermanent UserProfile[] @relation("UserProfilePermanentDistrict")
+  teachers              Teacher[]
 
   @@index([divisionId])
   @@map("districts")
@@ -958,6 +960,7 @@ model Upazila {
   schools               School[]
   userProfilesPresent   UserProfile[] @relation("UserProfilePresentUpazila")
   userProfilesPermanent UserProfile[] @relation("UserProfilePermanentUpazila")
+  teachers              Teacher[]
 
   @@index([districtId])
   @@map("upazilas")
@@ -1109,7 +1112,8 @@ model Subject {
   deletedAt DateTime? @map("deleted_at") @db.Timestamptz
   deletedBy String?   @map("deleted_by") @db.Uuid
 
-  classes SubjectClass[]
+  classes  SubjectClass[]
+  teachers Teacher[]
 
   @@index([code])
   @@index([type])
@@ -1199,3 +1203,288 @@ model ClassRoom {
   @@map("class_rooms")
   @@schema("tenant")
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DESIGNATIONS
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Designation {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  name   String  @db.VarChar(100)
+  // "Assistant Teacher", "Senior Teacher", "Lecturer", "Mohaddes", "Muhtamim", etc.
+  nameBn String? @map("name_bn") @db.VarChar(100)
+
+  category String @db.VarChar(50)
+  // teaching | administrative | religious_instruction | support | management
+
+  applicableTo Json @map("applicable_to")
+  // array: ["school", "college", "madrasa_alia", "madrasa_qawmi"]
+  // controls which institution types see this designation in dropdowns
+
+  level Int @default(0)
+  // seniority rank for sorting/promotion order — higher number = more senior
+
+  isHeadRole Boolean @default(false) @map("is_head_role")
+  // flags Head Teacher / Principal / Superintendent / Muhtamim roles
+
+  isSystem Boolean @default(true) @map("is_system")
+  // true = pre-seeded by platform; false = custom-added by school admin
+
+  isActive Boolean @default(true) @map("is_active")
+
+  // ── Timestamps ─────────────────────────────────────────────
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  // ── Soft delete ────────────────────────────────────────────
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz
+  // null = active; non-null = soft-deleted
+  deletedBy String?   @map("deleted_by") @db.Uuid
+
+  teachers Teacher[]
+
+  @@index([category])
+  @@index([isActive])
+  @@index([deletedAt])
+  @@map("designations")
+  @@schema("tenant")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DEPARTMENTS
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Department {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  name   String  @db.VarChar(100)
+  // "Science", "Humanities", "Commerce", "Arabic & Islamic Studies", etc.
+  nameBn String? @map("name_bn") @db.VarChar(100)
+
+  headTeacherId String? @unique @map("head_teacher_id") @db.Uuid
+  // FK → teachers.id — nullable, assigned after first teacher is created.
+  // @unique: each department has at most one head teacher.
+  // Migration order: create departments (null) → create teachers → backfill.
+
+  description String? @db.Text
+  isActive    Boolean @default(true) @map("is_active")
+
+  // ── Timestamps ─────────────────────────────────────────────
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  // ── Soft delete ────────────────────────────────────────────
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz
+  // null = active; non-null = soft-deleted
+  deletedBy String?   @map("deleted_by") @db.Uuid
+
+  // ── Relations ──────────────────────────────────────────────
+  headTeacher Teacher?  @relation("DepartmentHead", fields: [headTeacherId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  teachers    Teacher[] @relation("TeacherDepartment")
+
+  @@index([isActive])
+  @@index([deletedAt])
+  @@map("departments")
+  @@schema("tenant")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TEACHERS
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Teacher {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  // ── Identity link ───────────────────────────────────────────
+  userId String? @unique @map("user_id") @db.Uuid
+  // FK → public.users.id — no Prisma relation (cross-schema boundary)
+  // Links teacher record to the login account
+
+  // ── Basic personal info ─────────────────────────────────────
+  employeeCode String  @map("employee_code") @db.VarChar(30)
+  // school-generated code e.g. "TCH-2024-001"
+  // PARTIAL UNIQUE INDEX applied via raw SQL (WHERE deleted_at IS NULL)
+  // so a re-hired teacher gets a fresh record without collision
+
+  fullName      String   @map("full_name") @db.VarChar(255)
+  fullNameBn    String?  @map("full_name_bn") @db.VarChar(255)
+  fatherName    String?  @map("father_name") @db.VarChar(255)
+  motherName    String?  @map("mother_name") @db.VarChar(255)
+  dateOfBirth   DateTime @map("date_of_birth") @db.Date
+  gender        String   @db.VarChar(20)
+  // male | female | other
+  bloodGroup    String?  @map("blood_group") @db.VarChar(5)
+  religion      String?  @db.VarChar(50)
+  // free text — no lookup table. Supports all BD religion values.
+  nationality   String   @default("Bangladeshi") @db.VarChar(50)
+  maritalStatus String?  @map("marital_status") @db.VarChar(20)
+  // single | married | divorced | widowed
+
+  // ── Photo (Media pattern — url + placeholder pair) ───────────
+  photoUrl         String? @map("photo_url") @db.VarChar(500)
+  // relative path e.g. "/uploads/teacher_photo/dhaka_model/a1b2.webp"
+  photoPlaceholder String? @map("photo_placeholder") @db.Text
+  // base64 tiny blurred version for instant skeleton display
+  photoMediaId     String? @map("photo_media_id") @db.Uuid
+  // FK → public.media.id — no Prisma relation (cross-schema)
+
+  // ── National identity documents ──────────────────────────────
+  nid                String? @map("nid") @db.VarChar(20)
+  // PARTIAL UNIQUE INDEX: WHERE deleted_at IS NULL
+  // so a re-registered teacher with same NID works after soft-delete
+  birthCertificateNo String? @map("birth_certificate_no") @db.VarChar(30)
+  passportNo         String? @map("passport_no") @db.VarChar(20)
+
+  // ── Contact ──────────────────────────────────────────────────
+  phone          String  @db.VarChar(20)
+  alternatePhone String? @map("alternate_phone") @db.VarChar(20)
+  email          String? @db.VarChar(255)
+
+  // ── Location — present address ──────────────────────────────
+  // Nullable unlike School — address is collected after quick onboarding
+  divisionId       Int?     @map("division_id")
+  districtId       Int?     @map("district_id")
+  upazilaId        Int?     @map("upazila_id")
+  postCode         String?  @map("post_code") @db.VarChar(10)
+  address          String?  @db.Text
+  permanentAddress String?  @map("permanent_address") @db.Text
+  latitude         Decimal? @db.Decimal(10, 7)
+  longitude        Decimal? @db.Decimal(10, 7)
+
+  division Division? @relation(fields: [divisionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  district District? @relation(fields: [districtId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  upazila  Upazila?  @relation(fields: [upazilaId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  // ── Designation & Department ─────────────────────────────────
+  designationId String      @map("designation_id") @db.Uuid
+  designation   Designation @relation(fields: [designationId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  departmentId String?     @map("department_id") @db.Uuid
+  department   Department? @relation("TeacherDepartment", fields: [departmentId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  headOfDepartment Department? @relation("DepartmentHead")
+  // reverse side — lets you check which department this teacher heads (if any)
+
+  isHeadOfInstitution Boolean @default(false) @map("is_head_of_institution")
+  // flags Principal / Headmaster / Superintendent / Muhtamim
+  // used for permission elevation — drives special dashboard access
+
+  // ── Employment type & status ─────────────────────────────────
+  employmentType String @default("full_time") @map("employment_type") @db.VarChar(20)
+  // full_time | part_time | contractual | guest_teacher | visiting
+
+  status String @default("active") @map("status") @db.VarChar(20)
+  // active | on_leave | suspended | resigned | retired | terminated | transferred | deceased
+
+  joiningDate      DateTime  @map("joining_date") @db.Date
+  confirmationDate DateTime? @map("confirmation_date") @db.Date
+  resignationDate  DateTime? @map("resignation_date") @db.Date
+  retirementDate   DateTime? @map("retirement_date") @db.Date
+  exitReason       String?   @map("exit_reason") @db.Text
+
+  // ── MPO (Monthly Pay Order) — critical for Bangladesh govt-aided schools ──
+  isMpoListed   Boolean   @default(false) @map("is_mpo_listed")
+  mpoIndexNo    String?   @map("mpo_index_no") @db.VarChar(30)
+  // PARTIAL UNIQUE INDEX: WHERE deleted_at IS NULL
+  mpoIncludedAt DateTime? @map("mpo_included_at") @db.Date
+  mpoCategory   String?   @map("mpo_category") @db.VarChar(50)
+  // General | Madrasa | Technical | College etc.
+
+  // ── NTRCA registration ───────────────────────────────────────
+  ntrcaRegistered         Boolean @default(false) @map("ntrca_registered")
+  ntrcaRegNo              String? @map("ntrca_reg_no") @db.VarChar(30)
+  ntrcaRegYear            Int?    @map("ntrca_reg_year")
+  ntrcaCertificateUrl     String? @map("ntrca_certificate_url") @db.VarChar(500)
+  ntrcaCertificateMediaId String? @map("ntrca_certificate_media_id") @db.Uuid
+  // FK → public.media.id — no Prisma relation (cross-schema)
+  ntrcaSubject            String? @map("ntrca_subject") @db.VarChar(100)
+
+  // ── BANBEIS institutional codes ──────────────────────────────
+  banbeisTeacherId String? @map("banbeis_teacher_id") @db.VarChar(30)
+  // BANBEIS annual census identifier
+
+  // ── Academic qualifications ──────────────────────────────────
+  highestQualification       String? @map("highest_qualification") @db.VarChar(100)
+  // SSC | HSC | BA | BSc | MA | MSc | BEd | MEd | PhD etc.
+  qualificationDetails       Json?   @map("qualification_details")
+  // structured: [{degree, institution, board, result, year}]
+  professionalQualifications Json?   @map("professional_qualifications")
+  // structured: [{type, institution, year}] — BEd, MEd, diploma etc.
+
+  // ── Subject specialization ───────────────────────────────────
+  primarySubjectId       String? @map("primary_subject_id") @db.Uuid
+  // FK → tenant.subjects.id — main teaching subject
+  specializationSubjects Json?   @map("specialization_subjects")
+  // array of subject UUIDs this teacher is qualified to teach
+
+  primarySubject Subject? @relation(fields: [primarySubjectId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  // ── Salary & payment ─────────────────────────────────────────
+  salaryGrade      String?  @map("salary_grade") @db.VarChar(20)
+  basicSalary      Decimal? @map("basic_salary") @db.Decimal(10, 2)
+  bankAccountNo    String?  @map("bank_account_no") @db.VarChar(50)
+  bankName         String?  @map("bank_name") @db.VarChar(100)
+  bankBranch       String?  @map("bank_branch") @db.VarChar(100)
+  mobileWalletNo   String?  @map("mobile_wallet_no") @db.VarChar(20)
+  mobileWalletType String?  @map("mobile_wallet_type") @db.VarChar(20)
+  // bkash | nagad | rocket
+
+  // ── Multi-school career / transfer tracking ──────────────────
+  globalPersonId      String?   @map("global_person_id") @db.Uuid
+  // same UUID carried across schools — links this teacher's career history
+  transferredFrom     String?   @map("transferred_from") @db.VarChar(63)
+  // source tenant schema name (e.g. "dhaka_model_school")
+  transferredTo       String?   @map("transferred_to") @db.VarChar(63)
+  // destination tenant schema name
+  transferDate        DateTime? @map("transfer_date") @db.Date
+  previousInstitution String?   @map("previous_institution") @db.VarChar(255)
+  yearsOfExperience   Decimal?  @map("years_of_experience") @db.Decimal(4, 1)
+
+  // ── Documents (Media pattern) ────────────────────────────────
+  documents Json? @map("documents")
+  // array of {type, mediaId, url, placeholder, uploadedAt}
+  // type: nid_copy | certificate | resume | joining_letter | release_order
+
+  // ── Religious considerations (madrasa-relevant) ──────────────
+  isHafiz    Boolean? @map("is_hafiz")
+  qiratGrade String?  @map("qirat_grade") @db.VarChar(50)
+  // Mumayyaz | Jayyid | Jayyid Jiddan | Hifz etc.
+
+  // ── Academic session linkage ─────────────────────────────────
+  joiningSessionId String? @map("joining_session_id") @db.Uuid
+  // FK → public.academic_sessions.id — no Prisma relation (cross-schema)
+  // records which academic session this teacher's employment started in
+
+  // ── Metadata ─────────────────────────────────────────────────
+  notes String? @db.Text
+
+  // ── Timestamps ─────────────────────────────────────────────
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  // ── Soft delete ────────────────────────────────────────────
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz
+  // null = active; non-null = soft-deleted (resigned/terminated/transferred)
+  deletedBy String?   @map("deleted_by") @db.Uuid
+
+  @@index([status])
+  @@index([designationId])
+  @@index([departmentId])
+  @@index([isMpoListed])
+  // mpoIndexNo, nid, employeeCode uniqueness enforced via partial indexes (WHERE deleted_at IS NULL)
+  // See migration: add_teacher_partial_unique_indexes.sql
+  @@index([mpoIndexNo])
+  @@index([ntrcaRegNo])
+  @@index([nid])
+  @@index([globalPersonId])
+  @@index([employmentType])
+  @@index([divisionId])
+  @@index([districtId])
+  @@index([upazilaId])
+  @@index([primarySubjectId])
+  @@index([deletedAt])
+  @@map("teachers")
+  @@schema("tenant")
+}
+

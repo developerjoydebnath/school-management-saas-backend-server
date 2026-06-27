@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { SubscriptionStatus } from '@prisma/client';
 import { softDelete } from '../../common/utils/soft-delete.extension';
 import { PrismaService } from '../../cores/prisma.service';
@@ -84,8 +88,14 @@ export class SchoolSubscriptionsService {
 
     const where: any = {};
     const statuses = parseCsv(query.status).map((status) => {
-      if (!Object.values(SubscriptionStatus).includes(status as SubscriptionStatus)) {
-        throw new BadRequestException(`Invalid subscription status filter: ${status}`);
+      if (
+        !Object.values(SubscriptionStatus).includes(
+          status as SubscriptionStatus,
+        )
+      ) {
+        throw new BadRequestException(
+          `Invalid subscription status filter: ${status}`,
+        );
       }
       return status as SubscriptionStatus;
     });
@@ -111,7 +121,11 @@ export class SchoolSubscriptionsService {
     }
     if (query.search) {
       where.OR = [
-        { school: { schoolName: { contains: query.search, mode: 'insensitive' } } },
+        {
+          school: {
+            schoolName: { contains: query.search, mode: 'insensitive' },
+          },
+        },
         { plan: { name: { contains: query.search, mode: 'insensitive' } } },
         { notes: { contains: query.search, mode: 'insensitive' } },
       ];
@@ -125,7 +139,19 @@ export class SchoolSubscriptionsService {
     const [items, total] = await Promise.all([
       this.prisma.schoolSubscription.findMany({
         where,
-        include: RELATIONS,
+        select: {
+          id: true,
+          school: {
+            select: { schoolName: true },
+          },
+          plan: {
+            select: { name: true },
+          },
+          priceBdt: true,
+          startsAt: true,
+          expiresAt: true,
+          status: true,
+        },
         orderBy: { createdAt: 'desc' },
         skip,
         take: limit,

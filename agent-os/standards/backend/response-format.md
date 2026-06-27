@@ -26,6 +26,8 @@ export class RolesModule {}
 
 When returning arrays of items from a service (especially inside `findAll` methods), always implement pagination using Prisma's `skip` and `take`, running both the query and `count` simultaneously using `Promise.all`. The response object MUST contain the standard metadata fields.
 
+List endpoints must return only the fields required by the visible table/list UI and row actions. Do not include full nested detail relationships in `findAll` just because a details UI exists. If a details sheet/page needs extra data, the frontend must call the detail endpoint by id when the user opens that details UI.
+
 ```typescript
 async findAll(page: number = 1, limit: number = 10, search?: string) {
     const where: any = { /* ... */ };

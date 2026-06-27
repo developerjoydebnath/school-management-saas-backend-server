@@ -91,6 +91,16 @@ export class VouchersService {
         orderBy: { createdAt: 'desc' },
         skip,
         take: limit,
+        select: {
+          id: true,
+          code: true,
+          name: true,
+          discountType: true,
+          discountValue: true,
+          currentRedemptions: true,
+          maxRedemptions: true,
+          isActive: true,
+        },
       }),
       this.prisma.voucher.count({ where }),
     ]);

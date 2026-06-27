@@ -65,7 +65,10 @@ function toMoney(value: any): number {
   return Number(value ?? 0);
 }
 
-function calculateDiscountAmount(discount: any, originalAmount: number): number {
+function calculateDiscountAmount(
+  discount: any,
+  originalAmount: number,
+): number {
   const storedAmount = toMoney(discount.discountAmountBdt);
   if (storedAmount > 0) {
     return Math.min(storedAmount, originalAmount);
@@ -79,7 +82,10 @@ function calculateDiscountAmount(discount: any, originalAmount: number): number 
   return Math.min(discountValue, originalAmount);
 }
 
-function calculateVoucherDiscountAmount(voucher: any, originalAmount: number): number {
+function calculateVoucherDiscountAmount(
+  voucher: any,
+  originalAmount: number,
+): number {
   const discountValue = toMoney(voucher.discountValue);
   if (voucher.discountType === 'percentage') {
     return Math.min((originalAmount * discountValue) / 100, originalAmount);
@@ -165,7 +171,7 @@ export class PaymentsService {
       await this.applyPaymentDiscountCycle(
         tx,
         quote,
-        (created.status || PaymentStatus.pending) as PaymentStatus,
+        created.status || PaymentStatus.pending,
         adminId,
       );
       const paymentDate =
@@ -177,7 +183,7 @@ export class PaymentsService {
         quote.subscription.id,
         paymentDate,
         cycles,
-        (created.status || PaymentStatus.pending) as PaymentStatus,
+        created.status || PaymentStatus.pending,
       );
 
       return created;
@@ -216,7 +222,9 @@ export class PaymentsService {
 
     const statuses = parseCsv(query.status).map((status) => {
       if (!Object.values(PaymentStatus).includes(status as PaymentStatus)) {
-        throw new BadRequestException(`Invalid payment status filter: ${status}`);
+        throw new BadRequestException(
+          `Invalid payment status filter: ${status}`,
+        );
       }
       return status as PaymentStatus;
     });
@@ -229,7 +237,9 @@ export class PaymentsService {
 
     const methods = parseCsv(query.method).map((method) => {
       if (!Object.values(PaymentMethod).includes(method as PaymentMethod)) {
-        throw new BadRequestException(`Invalid payment method filter: ${method}`);
+        throw new BadRequestException(
+          `Invalid payment method filter: ${method}`,
+        );
       }
       return method as PaymentMethod;
     });
@@ -245,7 +255,11 @@ export class PaymentsService {
         { transactionId: { contains: query.search, mode: 'insensitive' } },
         { invoiceId: { contains: query.search, mode: 'insensitive' } },
         { notes: { contains: query.search, mode: 'insensitive' } },
-        { school: { schoolName: { contains: query.search, mode: 'insensitive' } } },
+        {
+          school: {
+            schoolName: { contains: query.search, mode: 'insensitive' },
+          },
+        },
         {
           subscription: {
             plan: { name: { contains: query.search, mode: 'insensitive' } },
@@ -257,7 +271,26 @@ export class PaymentsService {
     const [items, total] = await Promise.all([
       this.prisma.payment.findMany({
         where,
-        include: PAYMENT_RELATIONS,
+        select: {
+          id: true,
+          school: {
+            select: { schoolName: true },
+          },
+          subscription: {
+            select: {
+              plan: {
+                select: { name: true },
+              },
+            },
+          },
+          amount: true,
+          currency: true,
+          method: true,
+          status: true,
+          paidAt: true,
+          transactionId: true,
+          invoiceId: true,
+        },
         orderBy: { createdAt: 'desc' },
         skip,
         take: limit,
@@ -660,10 +693,12 @@ export class PaymentsService {
     }
 
     const planName = payment.subscription?.plan?.name || 'Subscription Plan';
-    
+
     const htmlContent = getInvoiceTemplate(
       payment.invoiceId || payment.id.substring(0, 8),
-      payment.paidAt ? payment.paidAt.toLocaleDateString() : new Date().toLocaleDateString(),
+      payment.paidAt
+        ? payment.paidAt.toLocaleDateString()
+        : new Date().toLocaleDateString(),
       payment.method,
       payment.transactionId,
       payment.amount.toString(),
@@ -677,7 +712,10 @@ export class PaymentsService {
   }
 
   private hasRemainingDiscountCycle(discount: any) {
-    if (discount.durationCycles === null || discount.durationCycles === undefined) {
+    if (
+      discount.durationCycles === null ||
+      discount.durationCycles === undefined
+    ) {
       return true;
     }
 
@@ -685,13 +723,17 @@ export class PaymentsService {
   }
 
   private findCurrentDiscount(discounts: any[]) {
-    return discounts.find((discount) => this.hasRemainingDiscountCycle(discount));
+    return discounts.find((discount) =>
+      this.hasRemainingDiscountCycle(discount),
+    );
   }
 
   private resolveOriginalAmount(subscription: any, discount?: any) {
     const subscriptionAmount = toMoney(subscription.priceBdt);
     const planAmount = toMoney(subscription.plan?.priceBdt);
-    const storedDiscountAmount = discount ? toMoney(discount.discountAmountBdt) : 0;
+    const storedDiscountAmount = discount
+      ? toMoney(discount.discountAmountBdt)
+      : 0;
     const looksLikeAlreadyDiscounted =
       discount &&
       planAmount > subscriptionAmount &&
@@ -866,7 +908,10 @@ export class PaymentsService {
         })
       : null;
 
-    if (existingSelectedDiscount && !this.hasRemainingDiscountCycle(existingSelectedDiscount)) {
+    if (
+      existingSelectedDiscount &&
+      !this.hasRemainingDiscountCycle(existingSelectedDiscount)
+    ) {
       throw new BadRequestException('Voucher duration cycle has ended');
     }
 
@@ -884,7 +929,8 @@ export class PaymentsService {
           )
         : null;
     const selectedDiscount =
-      existingSelectedDiscount || (!selectedVoucherCode ? currentDiscount : null);
+      existingSelectedDiscount ||
+      (!selectedVoucherCode ? currentDiscount : null);
     if (
       selectedDiscount?.voucher?.minimumBillBdt &&
       originalBillAmount < Number(selectedDiscount.voucher.minimumBillBdt)
@@ -937,9 +983,8 @@ export class PaymentsService {
       remainingMaxDiscountAmount === null
         ? rawDiscountAmount
         : Math.min(rawDiscountAmount, remainingMaxDiscountAmount);
-    const voucherAppliedCycles = newVoucher || selectedDiscount
-      ? eligibleDiscountedCycles
-      : 0;
+    const voucherAppliedCycles =
+      newVoucher || selectedDiscount ? eligibleDiscountedCycles : 0;
     const discountedCycles = discountAmount > 0 ? voucherAppliedCycles : 0;
     const fullPriceCycles = cycles - discountedCycles;
     const effectivePerCycleDiscountAmount =
@@ -973,24 +1018,31 @@ export class PaymentsService {
         remainingMaxDiscountAmount !== null &&
         rawDiscountAmount > remainingMaxDiscountAmount,
       remainingCycles,
-      discount: newVoucher || selectedDiscount ? {
-        id: selectedDiscount?.id ?? null,
-        voucherId: newVoucher?.id ?? selectedDiscount?.voucherId ?? null,
-        voucherCode:
-          newVoucher?.code ||
-          selectedDiscount?.voucherCode ||
-          selectedDiscount?.voucher?.code ||
-          null,
-        voucherName: newVoucher?.name || selectedDiscount?.voucher?.name || null,
-        discountType: newVoucher?.discountType || selectedDiscount?.discountType,
-        discountValue: toMoney(newVoucher?.discountValue ?? selectedDiscount?.discountValue),
-        discountAmountBdt: effectivePerCycleDiscountAmount,
-        durationCycles,
-        remainingCycles:
-          remainingCycles === null
-            ? null
-            : Math.max(remainingCycles - voucherAppliedCycles, 0),
-      } : null,
+      discount:
+        newVoucher || selectedDiscount
+          ? {
+              id: selectedDiscount?.id ?? null,
+              voucherId: newVoucher?.id ?? selectedDiscount?.voucherId ?? null,
+              voucherCode:
+                newVoucher?.code ||
+                selectedDiscount?.voucherCode ||
+                selectedDiscount?.voucher?.code ||
+                null,
+              voucherName:
+                newVoucher?.name || selectedDiscount?.voucher?.name || null,
+              discountType:
+                newVoucher?.discountType || selectedDiscount?.discountType,
+              discountValue: toMoney(
+                newVoucher?.discountValue ?? selectedDiscount?.discountValue,
+              ),
+              discountAmountBdt: effectivePerCycleDiscountAmount,
+              durationCycles,
+              remainingCycles:
+                remainingCycles === null
+                  ? null
+                  : Math.max(remainingCycles - voucherAppliedCycles, 0),
+            }
+          : null,
     };
   }
 
@@ -1136,7 +1188,8 @@ export class PaymentsService {
   ) {
     if (
       dto.amount !== undefined &&
-      roundMoney(toMoney(dto.amount)) !== roundMoney(toMoney(existingPayment.amount))
+      roundMoney(toMoney(dto.amount)) !==
+        roundMoney(toMoney(existingPayment.amount))
     ) {
       throw new BadRequestException(
         'Payment amount is calculated by the backend and cannot be changed directly. Refresh the quote and create a corrected payment.',

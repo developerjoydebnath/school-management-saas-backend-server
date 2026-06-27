@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../cores/prisma.service';
 import { CreateSchoolBankAccountDto } from './dto/create-school-bank-account.dto';
@@ -82,20 +86,30 @@ export class SchoolBankAccountsService {
         { accountNo: { contains: query.search, mode: 'insensitive' } },
         { bankName: { contains: query.search, mode: 'insensitive' } },
         { bankBranch: { contains: query.search, mode: 'insensitive' } },
-        { school: { schoolName: { contains: query.search, mode: 'insensitive' } } },
+        {
+          school: {
+            schoolName: { contains: query.search, mode: 'insensitive' },
+          },
+        },
       ];
     }
 
     const [items, total] = await Promise.all([
       this.prisma.schoolBankAccount.findMany({
         where,
-        include: {
+        select: {
+          id: true,
           school: {
-            select: {
-              id: true,
-              schoolName: true,
-            },
+            select: { schoolName: true },
           },
+          accountLabel: true,
+          accountPurpose: true,
+          bankName: true,
+          bankBranch: true,
+          accountNo: true,
+          bankRoutingNo: true,
+          isActive: true,
+          isPrimary: true,
         },
         orderBy: { createdAt: 'desc' },
         skip,

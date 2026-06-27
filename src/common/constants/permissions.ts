@@ -76,5 +76,23 @@ export const PERMISSIONS = {
       DELETE: 'schools_management.payments.delete',
     },
   },
+  STAFF: {
+    ALL: 'staff.all',
+    VIEW: 'staff.view',
+    DESIGNATIONS: {
+      ALL: 'staff.designations.all',
+      VIEW: 'staff.designations.view',
+      CREATE: 'staff.designations.create',
+      EDIT: 'staff.designations.edit',
+      DELETE: 'staff.designations.delete',
+    },
+    DEPARTMENTS: {
+      ALL: 'staff.departments.all',
+      VIEW: 'staff.departments.view',
+      CREATE: 'staff.departments.create',
+      EDIT: 'staff.departments.edit',
+      DELETE: 'staff.departments.delete',
+    },
+  },
   // Add other modules permissions here as needed
 };
