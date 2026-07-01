@@ -10,6 +10,7 @@ import { ClassesModule } from './modules/academics/classes/classes.module';
 import { SessionsModule } from './modules/academics/sessions/sessions.module';
 import { ShiftsModule } from './modules/academics/shifts/shifts.module';
 import { SubjectsModule } from './modules/academics/subjects/subjects.module';
+import { TimetablesModule } from './modules/academics/timetables/timetables.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { LocationsModule } from './modules/locations/locations.module';
 import { PaymentsModule } from './modules/payments/payments.module';
@@ -22,6 +23,7 @@ import { SchoolsModule } from './modules/schools/schools.module';
 import { SubscriptionPlansModule } from './modules/subscription-plans/subscription-plans.module';
 import { DepartmentsModule } from './modules/staff/departments/departments.module';
 import { DesignationsModule } from './modules/staff/designations/designations.module';
+import { TeachersModule } from './modules/staff/teachers/teachers.module';
 import { VouchersModule } from './modules/vouchers/vouchers.module';
 
 @Module({
@@ -33,6 +35,7 @@ import { VouchersModule } from './modules/vouchers/vouchers.module';
     ClassRoomsModule,
     ClassesModule,
     SubjectsModule,
+    TimetablesModule,
     ShiftsModule,
     SchoolsModule,
     RolesModule,
@@ -48,6 +51,7 @@ import { VouchersModule } from './modules/vouchers/vouchers.module';
     MediaModule,
     DesignationsModule,
     DepartmentsModule,
+    TeachersModule,
   ],
   controllers: [],
   providers: [],

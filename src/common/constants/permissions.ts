@@ -34,6 +34,13 @@ export const PERMISSIONS = {
     DELETE: 'academics.subjects.delete',
     ALL: 'academics.subjects.all',
   },
+  TIMETABLE: {
+    CREATE: 'academics.timetable.create',
+    VIEW: 'academics.timetable.view',
+    EDIT: 'academics.timetable.edit',
+    DELETE: 'academics.timetable.delete',
+    ALL: 'academics.timetable.all',
+  },
   ROLES: {
     VIEW: 'roles.view',
     ALL: 'roles.all',
@@ -92,6 +99,13 @@ export const PERMISSIONS = {
       CREATE: 'staff.departments.create',
       EDIT: 'staff.departments.edit',
       DELETE: 'staff.departments.delete',
+    },
+    TEACHERS: {
+      ALL: 'staff.teachers.all',
+      VIEW: 'staff.teachers.view',
+      CREATE: 'staff.teachers.create',
+      EDIT: 'staff.teachers.edit',
+      DELETE: 'staff.teachers.delete',
     },
   },
   // Add other modules permissions here as needed

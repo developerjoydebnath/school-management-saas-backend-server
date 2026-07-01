@@ -76,6 +76,16 @@ export class ClassesService {
       enName: true,
       bnName: true,
       status: true,
+      sections: {
+        where: { deletedAt: null, status: 'ACTIVE' },
+        select: {
+          id: true,
+          name: true,
+          classRoomId: true,
+          shiftId: true,
+        },
+        orderBy: { name: 'asc' as const },
+      },
     };
   }
 
@@ -113,8 +123,12 @@ export class ClassesService {
 
   private async assertSectionReferencesExist(sections?: SectionDto[]) {
     if (!this.hasSections(sections)) return;
-    const uniqueShiftIds = [...new Set(sections!.map((section) => section.shiftId))];
-    const uniqueRoomIds = [...new Set(sections!.map((section) => section.classRoomId))];
+    const uniqueShiftIds = [
+      ...new Set(sections!.map((section) => section.shiftId)),
+    ];
+    const uniqueRoomIds = [
+      ...new Set(sections!.map((section) => section.classRoomId)),
+    ];
     const prisma = this.tenantConnection.getTenantClient();
     const [shifts, rooms] = await Promise.all([
       prisma.shift.findMany({
@@ -127,10 +141,14 @@ export class ClassesService {
       }),
     ]);
     if (shifts.length !== uniqueShiftIds.length) {
-      throw new BadRequestException('One or more section shifts were not found');
+      throw new BadRequestException(
+        'One or more section shifts were not found',
+      );
     }
     if (rooms.length !== uniqueRoomIds.length) {
-      throw new BadRequestException('One or more section class rooms were not found');
+      throw new BadRequestException(
+        'One or more section class rooms were not found',
+      );
     }
   }
 
@@ -149,7 +167,9 @@ export class ClassesService {
       section.name.trim().toLowerCase(),
     );
     if (new Set(normalizedNames).size !== normalizedNames.length) {
-      throw new BadRequestException('Section names must be unique within a class');
+      throw new BadRequestException(
+        'Section names must be unique within a class',
+      );
     }
   }
 
@@ -164,7 +184,9 @@ export class ClassesService {
       select: { id: true },
     });
     if (existing) {
-      throw new ConflictException('A class with this English name already exists');
+      throw new ConflictException(
+        'A class with this English name already exists',
+      );
     }
   }
 
@@ -269,7 +291,9 @@ export class ClassesService {
       andFilters.push({
         OR: [
           { shiftId: { in: shiftIds } },
-          { sections: { some: { shiftId: { in: shiftIds }, deletedAt: null } } },
+          {
+            sections: { some: { shiftId: { in: shiftIds }, deletedAt: null } },
+          },
         ],
       });
     }
@@ -281,7 +305,11 @@ export class ClassesService {
       andFilters.push({
         OR: [
           { classRoomId: { in: classRoomIds } },
-          { sections: { some: { classRoomId: { in: classRoomIds }, deletedAt: null } } },
+          {
+            sections: {
+              some: { classRoomId: { in: classRoomIds }, deletedAt: null },
+            },
+          },
         ],
       });
     }
@@ -343,7 +371,8 @@ export class ClassesService {
     ) {
       this.validateClassDefaults({
         ...updateClassDto,
-        classRoomId: updateClassDto.classRoomId ?? existingClass.classRoomId ?? undefined,
+        classRoomId:
+          updateClassDto.classRoomId ?? existingClass.classRoomId ?? undefined,
         shiftId: updateClassDto.shiftId ?? existingClass.shiftId ?? undefined,
       });
     }
@@ -356,7 +385,9 @@ export class ClassesService {
       await this.assertSectionReferencesExist(updateClassDto.sections);
     } else {
       await Promise.all([
-        updateClassDto.shiftId ? this.assertShiftExists(updateClassDto.shiftId) : Promise.resolve(),
+        updateClassDto.shiftId
+          ? this.assertShiftExists(updateClassDto.shiftId)
+          : Promise.resolve(),
         updateClassDto.classRoomId
           ? this.assertClassRoomExists(updateClassDto.classRoomId)
           : Promise.resolve(),
@@ -378,8 +409,12 @@ export class ClassesService {
       return tx.class.update({
         where: { id },
         data: {
-          ...(updateClassDto.enName !== undefined ? { enName: updateClassDto.enName } : {}),
-          ...(updateClassDto.bnName !== undefined ? { bnName: updateClassDto.bnName || null } : {}),
+          ...(updateClassDto.enName !== undefined
+            ? { enName: updateClassDto.enName }
+            : {}),
+          ...(updateClassDto.bnName !== undefined
+            ? { bnName: updateClassDto.bnName || null }
+            : {}),
           ...(updateClassDto.status !== undefined
             ? { status: this.normalizeStatus(updateClassDto.status) }
             : {}),
@@ -388,7 +423,7 @@ export class ClassesService {
             ? {
                 classRoomId: hasSections
                   ? null
-                  : updateClassDto.classRoomId ?? existingClass.classRoomId,
+                  : (updateClassDto.classRoomId ?? existingClass.classRoomId),
               }
             : {}),
           ...(updateClassDto.sections !== undefined ||
@@ -396,7 +431,7 @@ export class ClassesService {
             ? {
                 shiftId: hasSections
                   ? null
-                  : updateClassDto.shiftId ?? existingClass.shiftId,
+                  : (updateClassDto.shiftId ?? existingClass.shiftId),
               }
             : {}),
           ...(hasSections

@@ -134,6 +134,72 @@ export class MediaService {
     });
   }
 
+  async processDocument(
+    buffer: Buffer,
+    originalName: string,
+    mimeType: string,
+    module: string,
+    schemaName: string | null,
+    uploadedBy: string,
+    entityType?: string,
+    entityId?: string,
+  ) {
+    // Step 1 — hash
+    const fileHash = crypto.createHash('sha256').update(buffer).digest('hex');
+
+    // Step 2 — dedup check
+    const existing = await this.prisma.media.findUnique({
+      where: { fileHash },
+    });
+
+    if (existing && !existing.isDeleted) {
+      await this.prisma.media.update({
+        where: { id: existing.id },
+        data: { referenceCount: { increment: 1 } },
+      });
+      return {
+        url: existing.path,
+        mediaId: existing.id,
+        deduplicated: true,
+      };
+    }
+
+    // Step 3 — save file to local storage
+    const ext = originalName.split('.').pop() || 'bin';
+    const baseFileName = crypto.randomUUID();
+    const folder = `uploads/${module}/${schemaName || 'global'}`;
+
+    const mainPath = await this.storage.upload(
+      `${folder}/${baseFileName}.${ext}`,
+      buffer,
+      mimeType,
+    );
+
+    // Step 4 — create Media record
+    const media = await this.prisma.media.create({
+      data: {
+        fileName: `${baseFileName}.${ext}`,
+        originalName,
+        path: mainPath,
+        mimeType: mimeType,
+        fileSize: buffer.length,
+        fileHash,
+        schemaName,
+        uploadedBy,
+        module,
+        entityType,
+        entityId,
+      },
+    });
+
+    return {
+      url: media.path,
+      mediaId: media.id,
+      originalName,
+      deduplicated: false,
+    };
+  }
+
   // Called by the daily cron job
   async cleanupOrphanedMedia() {
     const orphaned = await this.prisma.media.findMany({

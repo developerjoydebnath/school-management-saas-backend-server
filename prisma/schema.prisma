@@ -1055,6 +1055,7 @@ model Class {
   shift     Shift?     @relation(fields: [shiftId], references: [id], onDelete: SetNull)
   sections  Section[]
   subjects  SubjectClass[]
+  timetables Timetable[]
 
   @@index([classRoomId])
   @@index([shiftId])
@@ -1157,6 +1158,7 @@ model Section {
   class     Class     @relation(fields: [classId], references: [id], onDelete: Cascade)
   classRoom ClassRoom @relation(fields: [classRoomId], references: [id], onDelete: Restrict)
   shift     Shift     @relation(fields: [shiftId], references: [id], onDelete: Restrict)
+  timetables Timetable[]
 
   @@index([classId])
   @@index([classId, name])
@@ -1201,6 +1203,62 @@ model ClassRoom {
   @@index([status])
   @@index([deletedAt])
   @@map("class_rooms")
+  @@schema("tenant")
+}
+
+model Timetable {
+  id        String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sessionId String  @map("session_id") @db.Uuid
+  classId   String  @map("class_id") @db.Uuid
+  sectionId String? @map("section_id") @db.Uuid
+  title     String? @db.VarChar(255)
+  days      Json
+  columns   Json
+  cells     Json
+  version   Int     @default(1)
+  status    String  @default("ACTIVE") @db.VarChar(50)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz
+  deletedBy String?   @map("deleted_by") @db.Uuid
+
+  class     Class     @relation(fields: [classId], references: [id], onDelete: Restrict)
+  section   Section?  @relation(fields: [sectionId], references: [id], onDelete: SetNull)
+  histories TimetableHistory[]
+
+  @@index([sessionId])
+  @@index([classId])
+  @@index([sectionId])
+  @@index([sessionId, classId, sectionId])
+  @@index([status])
+  @@index([deletedAt])
+  @@map("timetables")
+  @@schema("tenant")
+}
+
+model TimetableHistory {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  timetableId String   @map("timetable_id") @db.Uuid
+  sessionId   String   @map("session_id") @db.Uuid
+  classId     String   @map("class_id") @db.Uuid
+  sectionId   String?  @map("section_id") @db.Uuid
+  title       String?  @db.VarChar(255)
+  days        Json
+  columns     Json
+  cells       Json
+  version     Int
+  changeType  String   @default("SAVE") @map("change_type") @db.VarChar(50)
+  savedBy     String?  @map("saved_by") @db.Uuid
+  savedAt     DateTime @default(now()) @map("saved_at") @db.Timestamptz
+
+  timetable Timetable @relation(fields: [timetableId], references: [id], onDelete: Cascade)
+
+  @@index([timetableId])
+  @@index([sessionId, classId, sectionId])
+  @@index([savedAt])
+  @@map("timetable_histories")
   @@schema("tenant")
 }
 
@@ -1487,4 +1545,3 @@ model Teacher {
   @@map("teachers")
   @@schema("tenant")
 }
-
