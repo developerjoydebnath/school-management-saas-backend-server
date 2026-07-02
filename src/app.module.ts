@@ -10,7 +10,9 @@ import { ClassesModule } from './modules/academics/classes/classes.module';
 import { SessionsModule } from './modules/academics/sessions/sessions.module';
 import { ShiftsModule } from './modules/academics/shifts/shifts.module';
 import { SubjectsModule } from './modules/academics/subjects/subjects.module';
+import { SyllabusesModule } from './modules/academics/syllabuses/syllabuses.module';
 import { TimetablesModule } from './modules/academics/timetables/timetables.module';
+import { ExamsModule } from './modules/examinations/exams/exams.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { LocationsModule } from './modules/locations/locations.module';
 import { PaymentsModule } from './modules/payments/payments.module';
@@ -35,6 +37,8 @@ import { VouchersModule } from './modules/vouchers/vouchers.module';
     ClassRoomsModule,
     ClassesModule,
     SubjectsModule,
+    ExamsModule,
+    SyllabusesModule,
     TimetablesModule,
     ShiftsModule,
     SchoolsModule,

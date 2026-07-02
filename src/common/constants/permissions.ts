@@ -34,6 +34,20 @@ export const PERMISSIONS = {
     DELETE: 'academics.subjects.delete',
     ALL: 'academics.subjects.all',
   },
+  EXAMS: {
+    CREATE: 'examinations.schedule.create',
+    VIEW: 'examinations.schedule.view',
+    EDIT: 'examinations.schedule.edit',
+    DELETE: 'examinations.schedule.delete',
+    ALL: 'examinations.schedule.all',
+  },
+  SYLLABUS: {
+    CREATE: 'academics.syllabus.create',
+    VIEW: 'academics.syllabus.view',
+    EDIT: 'academics.syllabus.edit',
+    DELETE: 'academics.syllabus.delete',
+    ALL: 'academics.syllabus.all',
+  },
   TIMETABLE: {
     CREATE: 'academics.timetable.create',
     VIEW: 'academics.timetable.view',

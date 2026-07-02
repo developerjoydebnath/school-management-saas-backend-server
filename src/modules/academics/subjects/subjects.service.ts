@@ -328,10 +328,21 @@ export class SubjectsService {
     };
   }
 
-  async findActiveList() {
+  async findActiveList(query: { classId?: string } = {}) {
     const prisma = this.tenantConnection.getTenantClient();
+    const classIds = String(query.classId || '')
+      .split(',')
+      .map((classId) => classId.trim())
+      .filter(Boolean);
+
     const items = await prisma.subject.findMany({
-      where: { status: 'ACTIVE', deletedAt: null },
+      where: {
+        status: 'ACTIVE',
+        deletedAt: null,
+        ...(classIds.length
+          ? { classes: { some: { classId: { in: classIds } } } }
+          : {}),
+      },
       select: this.getActiveListSelect(),
       orderBy: [{ sortOrder: 'asc' }, { enName: 'asc' }],
     });

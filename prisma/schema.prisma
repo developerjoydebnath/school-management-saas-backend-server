@@ -102,6 +102,68 @@ enum PaymentMethod {
   @@schema("public")
 }
 
+enum ExamType {
+  UNIT_TEST
+  CLASS_TEST
+  FIRST_TERM
+  HALF_YEARLY
+  ANNUAL
+  FINAL
+  MODEL_TEST
+  MOCK_TEST
+  PRE_TEST
+  CUSTOM
+
+  @@schema("tenant")
+}
+
+enum ExamStatus {
+  DRAFT
+  SCHEDULED
+  ONGOING
+  COMPLETED
+  CANCELLED
+  ARCHIVED
+
+  @@schema("tenant")
+}
+
+enum ExamSubjectStatus {
+  SCHEDULED
+  ONGOING
+  COMPLETED
+  CANCELLED
+  POSTPONED
+
+  @@schema("tenant")
+}
+
+enum SyllabusStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+
+  @@schema("tenant")
+}
+
+enum SyllabusChangeType {
+  CREATED
+  UPDATED
+  PUBLISHED
+  ARCHIVED
+  SUBJECT_ADDED
+  SUBJECT_REMOVED
+  CHAPTER_ADDED
+  CHAPTER_UPDATED
+  TOPIC_ADDED
+  TOPIC_UPDATED
+  TOPIC_COMPLETED
+  TOPIC_UNCOMPLETED
+  SNAPSHOT_CREATED
+
+  @@schema("tenant")
+}
+
 /// Global user login table. One row per (person × school).
 /// Three login identifier paths:
 ///   A) phone/email  → parents, teachers, admins, staff
@@ -1051,11 +1113,14 @@ model Class {
   deletedAt DateTime? @map("deleted_at") @db.Timestamptz
   deletedBy String?   @map("deleted_by") @db.Uuid
 
-  classRoom ClassRoom? @relation(fields: [classRoomId], references: [id], onDelete: SetNull)
-  shift     Shift?     @relation(fields: [shiftId], references: [id], onDelete: SetNull)
-  sections  Section[]
-  subjects  SubjectClass[]
-  timetables Timetable[]
+  classRoom    ClassRoom?     @relation(fields: [classRoomId], references: [id], onDelete: SetNull)
+  shift        Shift?         @relation(fields: [shiftId], references: [id], onDelete: SetNull)
+  sections     Section[]
+  subjects     SubjectClass[]
+  timetables   Timetable[]
+  examClasses  ExamClass[]
+  examSubjects ExamSubject[]
+  syllabuses   Syllabus[]
 
   @@index([classRoomId])
   @@index([shiftId])
@@ -1085,27 +1150,27 @@ enum SubjectMarkDivision {
 }
 
 model Subject {
-  id             String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  enName         String      @map("en_name") @db.VarChar(255)
-  bnName         String?     @map("bn_name") @db.VarChar(255)
-  code           String?     @db.VarChar(50)
-  boardCode      String?     @map("board_code") @db.VarChar(50)
-  type           SubjectType @default(MANDATORY)
-  group          String?     @db.VarChar(50)
-  paperCount     Int         @default(1) @map("paper_count")
-  fullMarks      Int         @default(100) @map("full_marks")
-  passMarks      Int         @default(33) @map("pass_marks")
-  markDivision   SubjectMarkDivision @default(WRITTEN) @map("mark_division")
-  writtenMarks   Int?        @map("written_marks")
-  writtenPassMarks Int?      @map("written_pass_marks")
-  mcqMarks       Int?        @map("mcq_marks")
-  mcqPassMarks   Int?        @map("mcq_pass_marks")
-  practicalMarks Int?        @map("practical_marks")
-  practicalPassMarks Int?    @map("practical_pass_marks")
-  theoryMarks    Int?        @map("theory_marks")
-  sortOrder      Int         @default(0) @map("sort_order")
-  status         String      @default("ACTIVE") @db.VarChar(50)
-  description    String?     @db.Text
+  id                 String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  enName             String              @map("en_name") @db.VarChar(255)
+  bnName             String?             @map("bn_name") @db.VarChar(255)
+  code               String?             @db.VarChar(50)
+  boardCode          String?             @map("board_code") @db.VarChar(50)
+  type               SubjectType         @default(MANDATORY)
+  group              String?             @db.VarChar(50)
+  paperCount         Int                 @default(1) @map("paper_count")
+  fullMarks          Int                 @default(100) @map("full_marks")
+  passMarks          Int                 @default(33) @map("pass_marks")
+  markDivision       SubjectMarkDivision @default(WRITTEN) @map("mark_division")
+  writtenMarks       Int?                @map("written_marks")
+  writtenPassMarks   Int?                @map("written_pass_marks")
+  mcqMarks           Int?                @map("mcq_marks")
+  mcqPassMarks       Int?                @map("mcq_pass_marks")
+  practicalMarks     Int?                @map("practical_marks")
+  practicalPassMarks Int?                @map("practical_pass_marks")
+  theoryMarks        Int?                @map("theory_marks")
+  sortOrder          Int                 @default(0) @map("sort_order")
+  status             String              @default("ACTIVE") @db.VarChar(50)
+  description        String?             @db.Text
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
@@ -1113,8 +1178,10 @@ model Subject {
   deletedAt DateTime? @map("deleted_at") @db.Timestamptz
   deletedBy String?   @map("deleted_by") @db.Uuid
 
-  classes  SubjectClass[]
-  teachers Teacher[]
+  classes          SubjectClass[]
+  teachers         Teacher[]
+  examSubjects     ExamSubject[]
+  syllabusSubjects SyllabusSubject[]
 
   @@index([code])
   @@index([type])
@@ -1155,10 +1222,11 @@ model Section {
   deletedAt DateTime? @map("deleted_at") @db.Timestamptz
   deletedBy String?   @map("deleted_by") @db.Uuid
 
-  class     Class     @relation(fields: [classId], references: [id], onDelete: Cascade)
-  classRoom ClassRoom @relation(fields: [classRoomId], references: [id], onDelete: Restrict)
-  shift     Shift     @relation(fields: [shiftId], references: [id], onDelete: Restrict)
+  class      Class       @relation(fields: [classId], references: [id], onDelete: Cascade)
+  classRoom  ClassRoom   @relation(fields: [classRoomId], references: [id], onDelete: Restrict)
+  shift      Shift       @relation(fields: [shiftId], references: [id], onDelete: Restrict)
   timetables Timetable[]
+  syllabuses Syllabus[]
 
   @@index([classId])
   @@index([classId, name])
@@ -1196,8 +1264,9 @@ model ClassRoom {
   deletedAt DateTime? @map("deleted_at") @db.Timestamptz
   deletedBy String?   @map("deleted_by") @db.Uuid
 
-  classes  Class[]
-  sections Section[]
+  classes      Class[]
+  sections     Section[]
+  examSubjects ExamSubject[]
 
   @@index([roomNo])
   @@index([status])
@@ -1224,8 +1293,8 @@ model Timetable {
   deletedAt DateTime? @map("deleted_at") @db.Timestamptz
   deletedBy String?   @map("deleted_by") @db.Uuid
 
-  class     Class     @relation(fields: [classId], references: [id], onDelete: Restrict)
-  section   Section?  @relation(fields: [sectionId], references: [id], onDelete: SetNull)
+  class     Class              @relation(fields: [classId], references: [id], onDelete: Restrict)
+  section   Section?           @relation(fields: [sectionId], references: [id], onDelete: SetNull)
   histories TimetableHistory[]
 
   @@index([sessionId])
@@ -1360,7 +1429,7 @@ model Teacher {
   // Links teacher record to the login account
 
   // ── Basic personal info ─────────────────────────────────────
-  employeeCode String  @map("employee_code") @db.VarChar(30)
+  employeeCode String @map("employee_code") @db.VarChar(30)
   // school-generated code e.g. "TCH-2024-001"
   // PARTIAL UNIQUE INDEX applied via raw SQL (WHERE deleted_at IS NULL)
   // so a re-hired teacher gets a fresh record without collision
@@ -1543,5 +1612,274 @@ model Teacher {
   @@index([primarySubjectId])
   @@index([deletedAt])
   @@map("teachers")
+  @@schema("tenant")
+}
+
+model Exam {
+  id                    String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sessionId             String     @map("session_id") @db.Uuid
+  name                  String     @db.VarChar(150)
+  nameBn                String?    @map("name_bn") @db.VarChar(150)
+  type                  ExamType   @default(HALF_YEARLY)
+  startDate             DateTime   @map("start_date") @db.Date
+  endDate               DateTime   @map("end_date") @db.Date
+  status                ExamStatus @default(DRAFT)
+  instructions          String?    @db.Text
+  instructionsBn        String?    @map("instructions_bn") @db.Text
+  gradingScale          String     @default("gpa_5") @map("grading_scale") @db.VarChar(30)
+  gradingRules          Json?      @map("grading_rules")
+  defaultPassMarks      Int        @default(33) @map("default_pass_marks")
+  defaultTotalMarks     Int        @default(100) @map("default_total_marks")
+  defaultWrittenMarks   Int        @default(70) @map("default_written_marks")
+  defaultMcqMarks       Int        @default(30) @map("default_mcq_marks")
+  defaultPracticalMarks Int        @default(0) @map("default_practical_marks")
+  defaultCaMarks        Int        @default(0) @map("default_ca_marks")
+  weightPercent         Decimal?   @map("weight_percent") @db.Decimal(5, 2)
+  publishToTeachersAt   DateTime?  @map("publish_to_teachers_at") @db.Timestamptz
+  publishToStudentsAt   DateTime?  @map("publish_to_students_at") @db.Timestamptz
+  createdBy             String?    @map("created_by") @db.Uuid
+  notes                 String?    @db.Text
+  createdAt             DateTime   @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt             DateTime   @updatedAt @map("updated_at") @db.Timestamptz
+  deletedAt             DateTime?  @map("deleted_at") @db.Timestamptz
+  deletedBy             String?    @map("deleted_by") @db.Uuid
+
+  classes    ExamClass[]
+  subjects   ExamSubject[]
+  syllabuses Syllabus[]
+
+  @@index([sessionId])
+  @@index([type])
+  @@index([status])
+  @@index([startDate, endDate])
+  @@index([deletedAt])
+  @@map("exams")
+  @@schema("tenant")
+}
+
+model ExamClass {
+  id                 String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  examId             String     @map("exam_id") @db.Uuid
+  classId            String     @map("class_id") @db.Uuid
+  status             ExamStatus @default(DRAFT)
+  chiefInvigilatorId String?    @map("chief_invigilator_id") @db.Uuid
+  resultLockedAt     DateTime?  @map("result_locked_at") @db.Timestamptz
+  resultLockedBy     String?    @map("result_locked_by") @db.Uuid
+  createdAt          DateTime   @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt          DateTime   @updatedAt @map("updated_at") @db.Timestamptz
+
+  exam     Exam          @relation(fields: [examId], references: [id], onDelete: Cascade)
+  class    Class         @relation(fields: [classId], references: [id], onDelete: Restrict)
+  subjects ExamSubject[]
+
+  @@unique([examId, classId])
+  @@index([examId])
+  @@index([classId])
+  @@index([status])
+  @@map("exam_classes")
+  @@schema("tenant")
+}
+
+model ExamSubject {
+  id                 String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  examId             String              @map("exam_id") @db.Uuid
+  examClassId        String              @map("exam_class_id") @db.Uuid
+  classId            String              @map("class_id") @db.Uuid
+  subjectId          String              @map("subject_id") @db.Uuid
+  examDate           DateTime?           @map("exam_date") @db.Date
+  startTime          String?             @map("start_time") @db.VarChar(10)
+  durationMins       Int                 @default(180) @map("duration_mins")
+  classRoomId        String?             @map("class_room_id") @db.Uuid
+  invigilatorId      String?             @map("invigilator_id") @db.Uuid
+  totalMarks         Int                 @default(100) @map("total_marks")
+  passMarks          Int                 @default(33) @map("pass_marks")
+  markDivision       SubjectMarkDivision @default(WRITTEN) @map("mark_division")
+  writtenMarks       Int                 @default(100) @map("written_marks")
+  writtenPassMarks   Int                 @default(33) @map("written_pass_marks")
+  mcqMarks           Int                 @default(0) @map("mcq_marks")
+  mcqPassMarks       Int                 @default(0) @map("mcq_pass_marks")
+  practicalMarks     Int                 @default(0) @map("practical_marks")
+  practicalPassMarks Int                 @default(0) @map("practical_pass_marks")
+  caMarks            Int                 @default(0) @map("ca_marks")
+  caPassMarks        Int                 @default(0) @map("ca_pass_marks")
+  status             ExamSubjectStatus   @default(SCHEDULED)
+  sortOrder          Int                 @default(0) @map("sort_order")
+  createdAt          DateTime            @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt          DateTime            @updatedAt @map("updated_at") @db.Timestamptz
+
+  exam      Exam       @relation(fields: [examId], references: [id], onDelete: Cascade)
+  examClass ExamClass  @relation(fields: [examClassId], references: [id], onDelete: Cascade)
+  class     Class      @relation(fields: [classId], references: [id], onDelete: Restrict)
+  subject   Subject    @relation(fields: [subjectId], references: [id], onDelete: Restrict)
+  classRoom ClassRoom? @relation(fields: [classRoomId], references: [id], onDelete: SetNull)
+
+  @@unique([examClassId, subjectId])
+  @@index([examId])
+  @@index([classId])
+  @@index([subjectId])
+  @@index([examDate])
+  @@index([status])
+  @@map("exam_subjects")
+  @@schema("tenant")
+}
+
+model Syllabus {
+  id                String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sessionId         String         @map("session_id") @db.Uuid
+  examId            String         @map("exam_id") @db.Uuid
+  classId           String         @map("class_id") @db.Uuid
+  sectionId         String?        @map("section_id") @db.Uuid
+  title             String?        @db.VarChar(255)
+  status            SyllabusStatus @default(DRAFT)
+  totalSubjects     Int            @default(0) @map("total_subjects")
+  totalChapters     Int            @default(0) @map("total_chapters")
+  totalTopics       Int            @default(0) @map("total_topics")
+  completedTopics   Int            @default(0) @map("completed_topics")
+  completionPercent Decimal        @default(0) @map("completion_percent") @db.Decimal(5, 2)
+  publishedAt       DateTime?      @map("published_at") @db.Timestamptz
+  createdBy         String?        @map("created_by") @db.Uuid
+  createdAt         DateTime       @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt         DateTime       @updatedAt @map("updated_at") @db.Timestamptz
+  deletedAt         DateTime?      @map("deleted_at") @db.Timestamptz
+  deletedBy         String?        @map("deleted_by") @db.Uuid
+
+  exam       Exam                  @relation(fields: [examId], references: [id], onDelete: Restrict)
+  class      Class                 @relation(fields: [classId], references: [id], onDelete: Restrict)
+  section    Section?              @relation(fields: [sectionId], references: [id], onDelete: SetNull)
+  subjects   SyllabusSubject[]
+  chapters   SyllabusChapter[]
+  topics     SyllabusTopic[]
+  histories  SyllabusHistory[]
+  activities SyllabusActivityLog[]
+
+  @@unique([sessionId, examId, classId, sectionId])
+  @@index([sessionId])
+  @@index([examId])
+  @@index([classId])
+  @@index([sectionId])
+  @@index([status])
+  @@index([deletedAt])
+  @@map("syllabuses")
+  @@schema("tenant")
+}
+
+model SyllabusSubject {
+  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  syllabusId        String   @map("syllabus_id") @db.Uuid
+  subjectId         String   @map("subject_id") @db.Uuid
+  teacherId         String?  @map("teacher_id") @db.Uuid
+  sortOrder         Int      @default(0) @map("sort_order")
+  totalChapters     Int      @default(0) @map("total_chapters")
+  totalTopics       Int      @default(0) @map("total_topics")
+  completedTopics   Int      @default(0) @map("completed_topics")
+  completionPercent Decimal  @default(0) @map("completion_percent") @db.Decimal(5, 2)
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  syllabus Syllabus          @relation(fields: [syllabusId], references: [id], onDelete: Cascade)
+  subject  Subject           @relation(fields: [subjectId], references: [id], onDelete: Restrict)
+  chapters SyllabusChapter[]
+  topics   SyllabusTopic[]
+
+  @@unique([syllabusId, subjectId])
+  @@index([syllabusId])
+  @@index([subjectId])
+  @@map("syllabus_subjects")
+  @@schema("tenant")
+}
+
+model SyllabusChapter {
+  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  syllabusId        String   @map("syllabus_id") @db.Uuid
+  syllabusSubjectId String   @map("syllabus_subject_id") @db.Uuid
+  chapterNo         Int      @default(1) @map("chapter_no")
+  title             String   @db.VarChar(255)
+  titleBn           String?  @map("title_bn") @db.VarChar(255)
+  pageRange         String?  @map("page_range") @db.VarChar(100)
+  learningOutcome   String?  @map("learning_outcome") @db.Text
+  sortOrder         Int      @default(0) @map("sort_order")
+  weightPercent     Decimal  @default(100) @map("weight_percent") @db.Decimal(5, 2)
+  totalTopics       Int      @default(0) @map("total_topics")
+  completedTopics   Int      @default(0) @map("completed_topics")
+  completionPercent Decimal  @default(0) @map("completion_percent") @db.Decimal(5, 2)
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  syllabus        Syllabus        @relation(fields: [syllabusId], references: [id], onDelete: Cascade)
+  syllabusSubject SyllabusSubject @relation(fields: [syllabusSubjectId], references: [id], onDelete: Cascade)
+  topics          SyllabusTopic[]
+
+  @@index([syllabusId])
+  @@index([syllabusSubjectId])
+  @@map("syllabus_chapters")
+  @@schema("tenant")
+}
+
+model SyllabusTopic {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  syllabusId        String    @map("syllabus_id") @db.Uuid
+  syllabusSubjectId String    @map("syllabus_subject_id") @db.Uuid
+  syllabusChapterId String    @map("syllabus_chapter_id") @db.Uuid
+  title             String    @db.VarChar(255)
+  titleBn           String?   @map("title_bn") @db.VarChar(255)
+  description       String?   @db.Text
+  estimatedClasses  Int       @default(1) @map("estimated_classes")
+  weightPercent     Decimal   @default(100) @map("weight_percent") @db.Decimal(5, 2)
+  progressPercent   Decimal   @default(0) @map("progress_percent") @db.Decimal(5, 2)
+  isCompleted       Boolean   @default(false) @map("is_completed")
+  completedAt       DateTime? @map("completed_at") @db.Timestamptz
+  completedBy       String?   @map("completed_by") @db.Uuid
+  sortOrder         Int       @default(0) @map("sort_order")
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt         DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  syllabus        Syllabus        @relation(fields: [syllabusId], references: [id], onDelete: Cascade)
+  syllabusSubject SyllabusSubject @relation(fields: [syllabusSubjectId], references: [id], onDelete: Cascade)
+  syllabusChapter SyllabusChapter @relation(fields: [syllabusChapterId], references: [id], onDelete: Cascade)
+
+  @@index([syllabusId])
+  @@index([syllabusSubjectId])
+  @@index([syllabusChapterId])
+  @@index([isCompleted])
+  @@map("syllabus_topics")
+  @@schema("tenant")
+}
+
+model SyllabusHistory {
+  id         String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  syllabusId String             @map("syllabus_id") @db.Uuid
+  version    Int                @default(1)
+  changeType SyllabusChangeType @default(SNAPSHOT_CREATED) @map("change_type")
+  snapshot   Json
+  summary    String?            @db.VarChar(255)
+  changedBy  String?            @map("changed_by") @db.Uuid
+  changedAt  DateTime           @default(now()) @map("changed_at") @db.Timestamptz
+
+  syllabus Syllabus @relation(fields: [syllabusId], references: [id], onDelete: Cascade)
+
+  @@index([syllabusId])
+  @@index([changedAt])
+  @@map("syllabus_histories")
+  @@schema("tenant")
+}
+
+model SyllabusActivityLog {
+  id            String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  syllabusId    String             @map("syllabus_id") @db.Uuid
+  entityType    String             @map("entity_type") @db.VarChar(50)
+  entityId      String?            @map("entity_id") @db.Uuid
+  changeType    SyllabusChangeType @map("change_type")
+  previousValue Json?              @map("previous_value")
+  newValue      Json?              @map("new_value")
+  message       String?            @db.VarChar(255)
+  changedBy     String?            @map("changed_by") @db.Uuid
+  changedAt     DateTime           @default(now()) @map("changed_at") @db.Timestamptz
+
+  syllabus Syllabus @relation(fields: [syllabusId], references: [id], onDelete: Cascade)
+
+  @@index([syllabusId])
+  @@index([changeType])
+  @@index([changedAt])
+  @@map("syllabus_activity_logs")
   @@schema("tenant")
 }

@@ -33,9 +33,10 @@ export class SubjectsController {
 
   @Get('active-list')
   @ApiOperation({ summary: 'List active subjects' })
+  @ApiQuery({ name: 'classId', required: false })
   @RequirePermissions(PERMISSIONS.SUBJECTS.VIEW, PERMISSIONS.SUBJECTS.ALL)
-  findActiveList() {
-    return this.subjectsService.findActiveList();
+  findActiveList(@Query('classId') classId?: string) {
+    return this.subjectsService.findActiveList({ classId });
   }
 
   @Get()
