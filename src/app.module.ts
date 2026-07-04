@@ -14,6 +14,7 @@ import { SyllabusesModule } from './modules/academics/syllabuses/syllabuses.modu
 import { TimetablesModule } from './modules/academics/timetables/timetables.module';
 import { ExamsModule } from './modules/examinations/exams/exams.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { InventoryModule } from './modules/inventory/inventory.module';
 import { LocationsModule } from './modules/locations/locations.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { PermissionsModule } from './modules/permissions/permissions.module';
@@ -40,6 +41,7 @@ import { VouchersModule } from './modules/vouchers/vouchers.module';
     ExamsModule,
     SyllabusesModule,
     TimetablesModule,
+    InventoryModule,
     ShiftsModule,
     SchoolsModule,
     RolesModule,

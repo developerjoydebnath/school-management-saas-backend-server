@@ -4,6 +4,7 @@ import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
 import * as nodemailer from 'nodemailer';
 import { PrismaService } from '../../cores/prisma.service';
+import { InventorySeedService } from '../inventory/inventory-seed.service';
 import { SchoolsMigrationService } from './schools.migration.service';
 import { getWelcomeEmailTemplate } from './templates/welcome-email.template';
 import { getRejectionEmailTemplate } from './templates/rejection-email.template';
@@ -16,6 +17,7 @@ export class SchoolsActivationService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly migrationService: SchoolsMigrationService,
+    private readonly inventorySeedService: InventorySeedService,
   ) {}
 
   /**
@@ -52,6 +54,11 @@ export class SchoolsActivationService {
 
       // Step 2 — Clone table structure from tenant_template
       await this.migrationService.cloneTenantTables(tx, school.schoolSlug);
+
+      await this.inventorySeedService.seedTenantSchema(
+        this.migrationService.toSchemaName(school.schoolSlug),
+        tx,
+      );
 
       // Step 3 — Create school admin user
       createdUserId = await this.createSchoolAdminUser(

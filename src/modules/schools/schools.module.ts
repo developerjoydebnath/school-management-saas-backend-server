@@ -3,6 +3,7 @@ import {
   PrismaService,
   TenantConnectionService,
 } from '../../cores/prisma.service';
+import { InventoryModule } from '../inventory/inventory.module';
 import { SchoolsActivationService } from './schools.activation.service';
 import { SchoolsController } from './schools.controller';
 import { SchoolsMigrationService } from './schools.migration.service';
@@ -10,6 +11,7 @@ import { SchoolsPublicController } from './schools.public.controller';
 import { SchoolsService } from './schools.service';
 
 @Module({
+  imports: [InventoryModule],
   controllers: [SchoolsController, SchoolsPublicController],
   providers: [
     SchoolsService,

@@ -30,11 +30,15 @@ import { SyllabusesService } from './syllabuses.service';
 export class SyllabusesController {
   constructor(private readonly syllabusesService: SyllabusesService) {}
 
+  private getUserId(req: any) {
+    return req.user?.userId || req.user?.id;
+  }
+
   @Post()
   @ApiOperation({ summary: 'Create syllabus for class or sections' })
   @RequirePermissions(PERMISSIONS.SYLLABUS.CREATE, PERMISSIONS.SYLLABUS.ALL)
   create(@Body() dto: CreateSyllabusDto, @Req() req: any) {
-    return this.syllabusesService.create(dto, req.user?.id);
+    return this.syllabusesService.create(dto, this.getUserId(req));
   }
 
   @Get()
@@ -64,7 +68,7 @@ export class SyllabusesController {
   @ApiOperation({ summary: 'Update syllabus and write history' })
   @RequirePermissions(PERMISSIONS.SYLLABUS.EDIT, PERMISSIONS.SYLLABUS.ALL)
   update(@Param('id') id: string, @Body() dto: UpdateSyllabusDto, @Req() req: any) {
-    return this.syllabusesService.update(id, dto, req.user?.id);
+    return this.syllabusesService.update(id, dto, this.getUserId(req));
   }
 
   @Patch(':id/status')
@@ -75,7 +79,7 @@ export class SyllabusesController {
     @Body('status') status: SyllabusStatusEnum,
     @Req() req: any,
   ) {
-    return this.syllabusesService.updateStatus(id, status, req.user?.id);
+    return this.syllabusesService.updateStatus(id, status, this.getUserId(req));
   }
 
   @Patch(':id/topics/:topicId')
@@ -87,7 +91,7 @@ export class SyllabusesController {
     @Body() dto: ToggleSyllabusTopicDto,
     @Req() req: any,
   ) {
-    return this.syllabusesService.toggleTopic(id, topicId, dto, req.user?.id);
+    return this.syllabusesService.toggleTopic(id, topicId, dto, this.getUserId(req));
   }
 
   @Get(':id/history')
@@ -108,6 +112,6 @@ export class SyllabusesController {
   @ApiOperation({ summary: 'Delete syllabus' })
   @RequirePermissions(PERMISSIONS.SYLLABUS.DELETE, PERMISSIONS.SYLLABUS.ALL)
   remove(@Param('id') id: string, @Req() req: any) {
-    return this.syllabusesService.remove(id, req.user?.id);
+    return this.syllabusesService.remove(id, this.getUserId(req));
   }
 }

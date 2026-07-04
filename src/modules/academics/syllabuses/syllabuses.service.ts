@@ -606,29 +606,23 @@ export class SyllabusesService {
     if (!topic) throw new NotFoundException('Syllabus topic not found');
 
     return this.prisma.$transaction(async (tx: any) => {
+      const nextProgress =
+        dto.isCompleted === true
+          ? 100
+          : dto.progressPercent !== undefined
+            ? dto.progressPercent
+            : dto.isCompleted === false
+              ? Math.min(this.toNumber(topic.progressPercent, 0), 99)
+              : this.toNumber(topic.progressPercent, 0);
+      const nextCompleted =
+        dto.isCompleted !== undefined ? dto.isCompleted : this.toNumber(nextProgress, 0) >= 100;
       await tx.syllabusTopic.update({
         where: { id: topicId },
         data: {
-          progressPercent:
-            dto.isCompleted === true
-              ? 100
-              : dto.progressPercent !== undefined
-                ? dto.progressPercent
-                : dto.isCompleted === false
-                  ? Math.min(this.toNumber(topic.progressPercent, 0), 99)
-                  : this.toNumber(topic.progressPercent, 0),
-          isCompleted:
-            dto.isCompleted !== undefined
-              ? dto.isCompleted
-              : this.toNumber(dto.progressPercent, 0) >= 100,
-          completedAt:
-            dto.isCompleted === true || this.toNumber(dto.progressPercent, 0) >= 100
-              ? new Date()
-              : null,
-          completedBy:
-            dto.isCompleted === true || this.toNumber(dto.progressPercent, 0) >= 100
-              ? changedBy || null
-              : null,
+          progressPercent: nextProgress,
+          isCompleted: nextCompleted,
+          completedAt: nextCompleted ? new Date() : null,
+          completedBy: nextCompleted ? changedBy || null : null,
         },
       });
       await this.refreshStats(tx, id);
@@ -646,14 +640,20 @@ export class SyllabusesService {
             progressPercent: topic.progressPercent,
           },
           newValue: {
-            isCompleted: dto.isCompleted,
-            progressPercent: dto.progressPercent,
+            isCompleted: nextCompleted,
+            progressPercent: nextProgress,
           },
           message: 'Topic progress updated',
           changedBy: changedBy || null,
         },
       });
-      await this.writeHistory(tx, id, 'TOPIC_UPDATED', changedBy, 'Syllabus progress updated');
+      await this.writeHistory(
+        tx,
+        id,
+        'TOPIC_UPDATED',
+        changedBy,
+        `"${topic.title}" topic's progress updated to ${this.roundPercent(nextProgress)}%`,
+      );
       return this.getSnapshot(tx, id);
     });
   }
@@ -680,13 +680,47 @@ export class SyllabusesService {
       }),
       this.prisma.syllabusHistory.count({ where: { syllabusId: id } }),
     ]);
+    const userIds = [
+      ...new Set(items.map((item: any) => item.changedBy).filter(Boolean)),
+    ] as string[];
+    const users = userIds.length
+      ? await this.prisma.user.findMany({
+          where: { id: { in: userIds } },
+          select: {
+            id: true,
+            email: true,
+            phone: true,
+            profile: {
+              select: {
+                firstName: true,
+                lastName: true,
+              },
+            },
+          },
+        })
+      : [];
+    const userNameById = new Map(
+      users.map((user: any) => {
+        const profileName = `${user.profile?.firstName || ''} ${
+          user.profile?.lastName || ''
+        }`.trim();
+        return [user.id, profileName || user.email || user.phone || user.id];
+      }),
+    );
+    const enrichedItems = items.map((item: any) => ({
+      ...item,
+      changedByName: item.changedBy
+        ? userNameById.get(item.changedBy) || item.changedBy
+        : 'System',
+      details: item.summary || null,
+    }));
     const totalPages = Math.ceil(total / limit);
     return {
       success: true,
       statusCode: 200,
       message: 'Syllabus history retrieved successfully',
       data: {
-        items,
+        items: enrichedItems,
         meta: {
           page,
           limit,

@@ -164,6 +164,84 @@ enum SyllabusChangeType {
   @@schema("tenant")
 }
 
+enum InventoryTrackingType {
+  QUANTITY
+  INDIVIDUAL
+
+  @@schema("tenant")
+}
+
+enum InventoryLocationType {
+  CLASSROOM
+  LAB
+  LIBRARY
+  OFFICE
+  STAFFROOM
+  SPORTS_ROOM
+  MOSQUE_ROOM
+  STORE
+  CANTEEN
+  COMMON_AREA
+  OTHER
+
+  @@schema("tenant")
+}
+
+enum InventoryCondition {
+  GOOD
+  FAIR
+  POOR
+  DAMAGED
+  UNDER_REPAIR
+  DISPOSED
+
+  @@schema("tenant")
+}
+
+enum InventoryAssetStatus {
+  IN_USE
+  IN_STORE
+  UNDER_REPAIR
+  DISPOSED
+  LOST
+  STOLEN
+
+  @@schema("tenant")
+}
+
+enum InventoryMovementType {
+  PURCHASE
+  TRANSFER
+  ISSUE
+  RETURN
+  ADJUSTMENT
+  DAMAGE
+  REPAIR_OUT
+  REPAIR_IN
+  DISPOSE
+  LOST
+
+  @@schema("tenant")
+}
+
+enum InventoryMaintenanceStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CANCELLED
+
+  @@schema("tenant")
+}
+
+enum InventoryMaintenancePriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+
+  @@schema("tenant")
+}
+
 /// Global user login table. One row per (person × school).
 /// Three login identifier paths:
 ///   A) phone/email  → parents, teachers, admins, staff
@@ -175,7 +253,7 @@ enum SyllabusChangeType {
 ///   ALTER TABLE public.users ADD CONSTRAINT must_have_identifier
 ///   CHECK (phone IS NOT NULL OR email IS NOT NULL OR student_code IS NOT NULL);
 model User {
-  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id          String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
   email       String?   @db.VarChar(255)
   phone       String?   @db.VarChar(20)
   studentCode String?   @map("student_code") @db.VarChar(30)
@@ -205,6 +283,7 @@ model User {
   permissions         UserPermission[]
   profile             UserProfile?
   administeredSchools School[]
+  InventoryAsset      InventoryAsset[]
 
   // ── Uniqueness ──────────────────────────────────────────────
   // IMPORTANT: Full @@unique constraints are intentionally NOT used here.
@@ -226,7 +305,7 @@ model User {
 }
 
 model UserProfile {
-  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id                 String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
   userId             String    @unique @map("user_id") @db.Uuid
   firstName          String    @map("first_name") @db.VarChar(255)
   lastName           String    @map("last_name") @db.VarChar(255)
@@ -290,7 +369,7 @@ model UserProfile {
 // ─────────────────────────────────────────────────────────────────────────────
 
 model Media {
-  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id String @id @default(dbgenerated("uuidv7()")) @db.Uuid
 
   fileName     String @map("file_name") @db.VarChar(255)
   originalName String @map("original_name") @db.VarChar(255)
@@ -371,7 +450,7 @@ model UserPermission {
 }
 
 model School {
-  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id String @id @default(dbgenerated("uuidv7()")) @db.Uuid
 
   // ── Basic identity ─────────────────────────────────────────
   schoolName String     @map("school_name") @db.VarChar(255)
@@ -557,7 +636,7 @@ model School {
 }
 
 model SchoolBankAccount {
-  id       String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id       String @id @default(dbgenerated("uuidv7()")) @db.Uuid
   schoolId String @map("school_id") @db.Uuid
 
   // ── Account identity ───────────────────────────────────────
@@ -610,7 +689,7 @@ model SchoolBankAccount {
 /// a specific school and never appear on the public pricing page.
 /// All limits are nullable; null means "unlimited" (no cap enforced).
 model SubscriptionPlan {
-  id   String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id   String @id @default(dbgenerated("uuidv7()")) @db.Uuid
   slug String @unique @db.VarChar(50)
   // unique URL-safe identifier: "basic" | "standard" | "premium" | "custom-<uuid>"
 
@@ -700,7 +779,7 @@ model SubscriptionPlan {
 /// they are copied/overridden from the plan at activation time, so changing
 /// a plan template later does not retroactively affect existing subscriptions.
 model SchoolSubscription {
-  id       String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id       String @id @default(dbgenerated("uuidv7()")) @db.Uuid
   schoolId String @map("school_id") @db.Uuid
   planId   String @map("plan_id") @db.Uuid
 
@@ -796,7 +875,7 @@ model SchoolSubscription {
 /// When applied to a subscription, a SchoolSubscriptionDiscount row is created
 /// that snapshots the voucher value at redemption time.
 model Voucher {
-  id   String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id   String @id @default(dbgenerated("uuidv7()")) @db.Uuid
   code String @unique @db.VarChar(50)
   // e.g. "SCHOOL50" | "NGO2025" | "LAUNCH20"
 
@@ -864,7 +943,7 @@ model Voucher {
 /// Covers both voucher redemptions and manual super admin adjustments.
 /// Acts as a full audit trail of every discount ever applied.
 model SchoolSubscriptionDiscount {
-  id             String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id             String @id @default(dbgenerated("uuidv7()")) @db.Uuid
   subscriptionId String @map("subscription_id") @db.Uuid
 
   // ── Adjustment type ────────────────────────────────────────
@@ -930,7 +1009,7 @@ model SchoolSubscriptionDiscount {
 /// PAYMENTS
 /// ─────────────────────────────────────────────────────────────────────────────
 model Payment {
-  id             String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id             String        @id @default(dbgenerated("uuidv7()")) @db.Uuid
   schoolId       String        @map("school_id") @db.Uuid
   subscriptionId String?       @map("subscription_id") @db.Uuid
   transactionId  String?       @unique @map("transaction_id") @db.VarChar(255)
@@ -959,7 +1038,7 @@ model Payment {
 }
 
 model AcademicSession {
-  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id        String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
   name      String   @db.VarChar(255)
   year      Int      @unique
   status    String   @default("ACTIVE") @db.VarChar(50)
@@ -1054,7 +1133,7 @@ model Union {
 // ─────────────────────────────────────────────────────────────────────────────
 
 model TenantRole {
-  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id          String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
   name        String   @db.VarChar(255)
   description String?  @db.Text
   permissions String[] // Array of permissionKey strings (e.g., ["academics.view", "academics.classes.all"])
@@ -1076,7 +1155,7 @@ model TenantRole {
 }
 
 model Shift {
-  id        String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id        String @id @default(dbgenerated("uuidv7()")) @db.Uuid
   name      String @db.VarChar(255)
   startTime String @map("start_time") @db.VarChar(50)
   endTime   String @map("end_time") @db.VarChar(50)
@@ -1100,7 +1179,7 @@ model Shift {
 }
 
 model Class {
-  id          String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id          String  @id @default(dbgenerated("uuidv7()")) @db.Uuid
   enName      String  @map("en_name") @db.VarChar(255)
   bnName      String? @map("bn_name") @db.VarChar(255)
   classRoomId String? @map("class_room_id") @db.Uuid
@@ -1150,7 +1229,7 @@ enum SubjectMarkDivision {
 }
 
 model Subject {
-  id                 String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id                 String              @id @default(dbgenerated("uuidv7()")) @db.Uuid
   enName             String              @map("en_name") @db.VarChar(255)
   bnName             String?             @map("bn_name") @db.VarChar(255)
   code               String?             @db.VarChar(50)
@@ -1194,7 +1273,7 @@ model Subject {
 }
 
 model SubjectClass {
-  id        String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id        String @id @default(dbgenerated("uuidv7()")) @db.Uuid
   subjectId String @map("subject_id") @db.Uuid
   classId   String @map("class_id") @db.Uuid
 
@@ -1209,7 +1288,7 @@ model SubjectClass {
 }
 
 model Section {
-  id          String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id          String @id @default(dbgenerated("uuidv7()")) @db.Uuid
   classId     String @map("class_id") @db.Uuid
   name        String @db.VarChar(100)
   classRoomId String @map("class_room_id") @db.Uuid
@@ -1239,7 +1318,7 @@ model Section {
 }
 
 model ClassRoom {
-  id          String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id          String  @id @default(dbgenerated("uuidv7()")) @db.Uuid
   name        String  @db.VarChar(255)
   roomNo      String  @map("room_no") @db.VarChar(50)
   capacity    Int
@@ -1264,9 +1343,10 @@ model ClassRoom {
   deletedAt DateTime? @map("deleted_at") @db.Timestamptz
   deletedBy String?   @map("deleted_by") @db.Uuid
 
-  classes      Class[]
-  sections     Section[]
-  examSubjects ExamSubject[]
+  classes            Class[]
+  sections           Section[]
+  examSubjects       ExamSubject[]
+  inventoryLocations InventoryLocation[]
 
   @@index([roomNo])
   @@index([status])
@@ -1275,8 +1355,325 @@ model ClassRoom {
   @@schema("tenant")
 }
 
+model InventoryCategory {
+  id          String  @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  name        String  @db.VarChar(120)
+  nameBn      String? @map("name_bn") @db.VarChar(120)
+  slug        String  @db.VarChar(120)
+  description String? @db.Text
+  iconName    String? @map("icon_name") @db.VarChar(50)
+  colorCode   String? @map("color_code") @db.VarChar(20)
+  isSystem    Boolean @default(false) @map("is_system")
+  isActive    Boolean @default(true) @map("is_active")
+  sortOrder   Int     @default(0) @map("sort_order")
+
+  createdBy String?   @map("created_by") @db.Uuid
+  updatedBy String?   @map("updated_by") @db.Uuid
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz
+  deletedBy String?   @map("deleted_by") @db.Uuid
+
+  items InventoryItem[]
+
+  @@unique([slug])
+  @@index([isActive])
+  @@index([isSystem])
+  @@index([deletedAt])
+  @@map("inventory_categories")
+  @@schema("tenant")
+}
+
+model InventoryItem {
+  id          String  @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  categoryId  String  @map("category_id") @db.Uuid
+  name        String  @db.VarChar(150)
+  nameBn      String? @map("name_bn") @db.VarChar(150)
+  code        String? @db.VarChar(60)
+  brand       String? @db.VarChar(100)
+  model       String? @db.VarChar(100)
+  description String? @db.Text
+
+  trackingType InventoryTrackingType @default(QUANTITY) @map("tracking_type")
+  unit         String                @default("piece") @db.VarChar(30)
+  material     String?               @db.VarChar(100)
+
+  length        Decimal? @db.Decimal(10, 3)
+  width         Decimal? @db.Decimal(10, 3)
+  height        Decimal? @db.Decimal(10, 3)
+  depth         Decimal? @db.Decimal(10, 3)
+  dimensionUnit String?  @map("dimension_unit") @db.VarChar(20)
+  weight        Decimal? @db.Decimal(10, 3)
+  weightUnit    String?  @map("weight_unit") @db.VarChar(20)
+
+  seatingCapacity  Int?     @map("seating_capacity")
+  isSeatingItem    Boolean  @default(false) @map("is_seating_item")
+  isDepreciable    Boolean  @default(false) @map("is_depreciable")
+  depreciationRate Decimal? @map("depreciation_rate") @db.Decimal(5, 2)
+  usefulLifeYears  Int?     @map("useful_life_years")
+  minimumStock     Int      @default(0) @map("minimum_stock")
+
+  photoUrl         String? @map("photo_url") @db.VarChar(500)
+  photoPlaceholder String? @map("photo_placeholder") @db.Text
+  photoMediaId     String? @map("photo_media_id") @db.Uuid
+  isActive         Boolean @default(true) @map("is_active")
+  sortOrder        Int     @default(0) @map("sort_order")
+
+  createdBy String?   @map("created_by") @db.Uuid
+  updatedBy String?   @map("updated_by") @db.Uuid
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz
+  deletedBy String?   @map("deleted_by") @db.Uuid
+
+  category     InventoryCategory      @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  stockBatches InventoryStockBatch[]
+  assets       InventoryAsset[]
+  movements    InventoryMovement[]
+  maintenances InventoryMaintenance[]
+
+  @@unique([code])
+  @@index([categoryId])
+  @@index([trackingType])
+  @@index([isActive])
+  @@index([isSeatingItem])
+  @@index([deletedAt])
+  @@map("inventory_items")
+  @@schema("tenant")
+}
+
+model InventoryLocation {
+  id           String                @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  locationType InventoryLocationType @map("location_type")
+  name         String                @db.VarChar(150)
+  code         String?               @db.VarChar(60)
+  building     String?               @db.VarChar(100)
+  floor        String?               @db.VarChar(50)
+  roomNo       String?               @map("room_no") @db.VarChar(50)
+  classRoomId  String?               @map("class_room_id") @db.Uuid
+  description  String?               @db.Text
+  status       String                @default("ACTIVE") @db.VarChar(50)
+
+  createdBy String?   @map("created_by") @db.Uuid
+  updatedBy String?   @map("updated_by") @db.Uuid
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz
+  deletedBy String?   @map("deleted_by") @db.Uuid
+
+  classRoom     ClassRoom?             @relation(fields: [classRoomId], references: [id], onDelete: SetNull)
+  stockBatches  InventoryStockBatch[]
+  assets        InventoryAsset[]
+  movementsFrom InventoryMovement[]    @relation("InventoryMovementFromLocation")
+  movementsTo   InventoryMovement[]    @relation("InventoryMovementToLocation")
+  maintenances  InventoryMaintenance[]
+
+  @@unique([code])
+  @@index([locationType])
+  @@index([classRoomId])
+  @@index([status])
+  @@index([deletedAt])
+  @@map("inventory_locations")
+  @@schema("tenant")
+}
+
+model InventoryStockBatch {
+  id         String @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  itemId     String @map("item_id") @db.Uuid
+  locationId String @map("location_id") @db.Uuid
+
+  quantityTotal    Int @default(0) @map("quantity_total")
+  quantityGood     Int @default(0) @map("quantity_good")
+  quantityDamaged  Int @default(0) @map("quantity_damaged")
+  quantityDisposed Int @default(0) @map("quantity_disposed")
+
+  purchaseDate  DateTime? @map("purchase_date") @db.Date
+  purchasePrice Decimal?  @map("purchase_price") @db.Decimal(12, 2)
+  totalCost     Decimal?  @map("total_cost") @db.Decimal(14, 2)
+  supplier      String?   @db.VarChar(150)
+  invoiceNo     String?   @map("invoice_no") @db.VarChar(80)
+
+  hasWarranty        Boolean   @default(false) @map("has_warranty")
+  warrantyPeriod     Int?      @map("warranty_period")
+  warrantyPeriodUnit String?   @map("warranty_period_unit") @db.VarChar(20)
+  warrantyExpires    DateTime? @map("warranty_expires") @db.Date
+  warrantyNotes      String?   @map("warranty_notes") @db.VarChar(255)
+  invoiceImageUrl    String?   @map("invoice_image_url") @db.VarChar(500)
+  invoicePlaceholder String?   @map("invoice_placeholder") @db.Text
+  notes              String?   @db.Text
+
+  createdBy String?   @map("created_by") @db.Uuid
+  updatedBy String?   @map("updated_by") @db.Uuid
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz
+  deletedBy String?   @map("deleted_by") @db.Uuid
+
+  item         InventoryItem          @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  location     InventoryLocation      @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  movements    InventoryMovement[]
+  maintenances InventoryMaintenance[]
+
+  @@index([itemId])
+  @@index([locationId])
+  @@index([purchaseDate])
+  @@index([warrantyExpires])
+  @@index([deletedAt])
+  @@map("inventory_stock_batches")
+  @@schema("tenant")
+}
+
+model InventoryAsset {
+  id           String               @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  itemId       String               @map("item_id") @db.Uuid
+  locationId   String               @map("location_id") @db.Uuid
+  assetTag     String               @map("asset_tag") @db.VarChar(80)
+  serialNo     String?              @map("serial_no") @db.VarChar(120)
+  macAddress   String?              @map("mac_address") @db.VarChar(30)
+  condition    InventoryCondition   @default(GOOD)
+  status       InventoryAssetStatus @default(IN_STORE)
+  assignedTo   String?              @map("assigned_to") @db.Uuid
+  assignedName String?              @map("assigned_name") @db.VarChar(150)
+  assignedAt   DateTime?            @map("assigned_at") @db.Timestamptz
+
+  purchaseDate  DateTime? @map("purchase_date") @db.Date
+  purchasePrice Decimal?  @map("purchase_price") @db.Decimal(12, 2)
+  supplier      String?   @db.VarChar(150)
+  invoiceNo     String?   @map("invoice_no") @db.VarChar(80)
+
+  hasWarranty        Boolean   @default(false) @map("has_warranty")
+  warrantyPeriod     Int?      @map("warranty_period")
+  warrantyPeriodUnit String?   @map("warranty_period_unit") @db.VarChar(20)
+  warrantyExpires    DateTime? @map("warranty_expires") @db.Date
+  warrantyNotes      String?   @map("warranty_notes") @db.VarChar(255)
+
+  currentValue      Decimal?  @map("current_value") @db.Decimal(12, 2)
+  lastDepreciatedAt DateTime? @map("last_depreciated_at") @db.Date
+  lastMaintenanceAt DateTime? @map("last_maintenance_at") @db.Date
+  nextMaintenanceAt DateTime? @map("next_maintenance_at") @db.Date
+  maintenanceNotes  String?   @map("maintenance_notes") @db.Text
+  notes             String?   @db.Text
+
+  createdBy String?   @map("created_by") @db.Uuid
+  updatedBy String?   @map("updated_by") @db.Uuid
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz
+  deletedBy String?   @map("deleted_by") @db.Uuid
+
+  item           InventoryItem          @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  location       InventoryLocation      @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  assignedToUser User?                  @relation(fields: [assignedTo], references: [id], onDelete: SetNull)
+  movements      InventoryMovement[]
+  maintenances   InventoryMaintenance[]
+
+  @@unique([assetTag])
+  @@unique([serialNo])
+  @@index([itemId])
+  @@index([locationId])
+  @@index([condition])
+  @@index([status])
+  @@index([assignedTo])
+  @@index([warrantyExpires])
+  @@index([deletedAt])
+  @@map("inventory_assets")
+  @@schema("tenant")
+}
+
+model InventoryMovement {
+  id              String                @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  itemId          String                @map("item_id") @db.Uuid
+  assetId         String?               @map("asset_id") @db.Uuid
+  stockBatchId    String?               @map("stock_batch_id") @db.Uuid
+  fromLocationId  String?               @map("from_location_id") @db.Uuid
+  toLocationId    String?               @map("to_location_id") @db.Uuid
+  movementType    InventoryMovementType @map("movement_type")
+  quantity        Int                   @default(1)
+  conditionBefore InventoryCondition?   @map("condition_before")
+  conditionAfter  InventoryCondition?   @map("condition_after")
+  referenceNo     String?               @map("reference_no") @db.VarChar(100)
+  notes           String?               @db.Text
+  createdBy       String?               @map("created_by") @db.Uuid
+  createdAt       DateTime              @default(now()) @map("created_at") @db.Timestamptz
+
+  item         InventoryItem        @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  asset        InventoryAsset?      @relation(fields: [assetId], references: [id], onDelete: SetNull)
+  stockBatch   InventoryStockBatch? @relation(fields: [stockBatchId], references: [id], onDelete: SetNull)
+  fromLocation InventoryLocation?   @relation("InventoryMovementFromLocation", fields: [fromLocationId], references: [id], onDelete: SetNull)
+  toLocation   InventoryLocation?   @relation("InventoryMovementToLocation", fields: [toLocationId], references: [id], onDelete: SetNull)
+
+  @@index([itemId])
+  @@index([assetId])
+  @@index([stockBatchId])
+  @@index([fromLocationId])
+  @@index([toLocationId])
+  @@index([movementType])
+  @@index([createdAt])
+  @@map("inventory_movements")
+  @@schema("tenant")
+}
+
+model InventoryAuditLog {
+  id         String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  action     String   @db.VarChar(80)
+  entityType String   @map("entity_type") @db.VarChar(80)
+  entityId   String?  @map("entity_id") @db.Uuid
+  summary    String?  @db.VarChar(255)
+  beforeData Json?    @map("before_data")
+  afterData  Json?    @map("after_data")
+  createdBy  String?  @map("created_by") @db.Uuid
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([action])
+  @@index([entityType])
+  @@index([entityId])
+  @@index([createdAt])
+  @@map("inventory_audit_logs")
+  @@schema("tenant")
+}
+
+model InventoryMaintenance {
+  id               String                       @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  itemId           String                       @map("item_id") @db.Uuid
+  assetId          String?                      @map("asset_id") @db.Uuid
+  stockBatchId     String?                      @map("stock_batch_id") @db.Uuid
+  locationId       String?                      @map("location_id") @db.Uuid
+  issueTitle       String                       @map("issue_title") @db.VarChar(180)
+  issueDescription String?                      @map("issue_description") @db.Text
+  status           InventoryMaintenanceStatus   @default(OPEN)
+  priority         InventoryMaintenancePriority @default(MEDIUM)
+  serviceProvider  String?                      @map("service_provider") @db.VarChar(150)
+  cost             Decimal?                     @db.Decimal(12, 2)
+  reportedAt       DateTime                     @default(now()) @map("reported_at") @db.Timestamptz
+  resolvedAt       DateTime?                    @map("resolved_at") @db.Timestamptz
+  notes            String?                      @db.Text
+
+  createdBy String?   @map("created_by") @db.Uuid
+  updatedBy String?   @map("updated_by") @db.Uuid
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz
+  deletedBy String?   @map("deleted_by") @db.Uuid
+
+  item       InventoryItem        @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  asset      InventoryAsset?      @relation(fields: [assetId], references: [id], onDelete: SetNull)
+  stockBatch InventoryStockBatch? @relation(fields: [stockBatchId], references: [id], onDelete: SetNull)
+  location   InventoryLocation?   @relation(fields: [locationId], references: [id], onDelete: SetNull)
+
+  @@index([itemId])
+  @@index([assetId])
+  @@index([stockBatchId])
+  @@index([locationId])
+  @@index([status])
+  @@index([priority])
+  @@index([reportedAt])
+  @@index([deletedAt])
+  @@map("inventory_maintenances")
+  @@schema("tenant")
+}
+
 model Timetable {
-  id        String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id        String  @id @default(dbgenerated("uuidv7()")) @db.Uuid
   sessionId String  @map("session_id") @db.Uuid
   classId   String  @map("class_id") @db.Uuid
   sectionId String? @map("section_id") @db.Uuid
@@ -1308,7 +1705,7 @@ model Timetable {
 }
 
 model TimetableHistory {
-  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id          String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
   timetableId String   @map("timetable_id") @db.Uuid
   sessionId   String   @map("session_id") @db.Uuid
   classId     String   @map("class_id") @db.Uuid
@@ -1336,7 +1733,7 @@ model TimetableHistory {
 // ─────────────────────────────────────────────────────────────────────────────
 
 model Designation {
-  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id String @id @default(dbgenerated("uuidv7()")) @db.Uuid
 
   name   String  @db.VarChar(100)
   // "Assistant Teacher", "Senior Teacher", "Lecturer", "Mohaddes", "Muhtamim", etc.
@@ -1383,7 +1780,7 @@ model Designation {
 // ─────────────────────────────────────────────────────────────────────────────
 
 model Department {
-  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id String @id @default(dbgenerated("uuidv7()")) @db.Uuid
 
   name   String  @db.VarChar(100)
   // "Science", "Humanities", "Commerce", "Arabic & Islamic Studies", etc.
@@ -1421,7 +1818,7 @@ model Department {
 // ─────────────────────────────────────────────────────────────────────────────
 
 model Teacher {
-  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id String @id @default(dbgenerated("uuidv7()")) @db.Uuid
 
   // ── Identity link ───────────────────────────────────────────
   userId String? @unique @map("user_id") @db.Uuid
@@ -1616,7 +2013,7 @@ model Teacher {
 }
 
 model Exam {
-  id                    String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id                    String     @id @default(dbgenerated("uuidv7()")) @db.Uuid
   sessionId             String     @map("session_id") @db.Uuid
   name                  String     @db.VarChar(150)
   nameBn                String?    @map("name_bn") @db.VarChar(150)
@@ -1658,7 +2055,7 @@ model Exam {
 }
 
 model ExamClass {
-  id                 String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id                 String     @id @default(dbgenerated("uuidv7()")) @db.Uuid
   examId             String     @map("exam_id") @db.Uuid
   classId            String     @map("class_id") @db.Uuid
   status             ExamStatus @default(DRAFT)
@@ -1681,7 +2078,7 @@ model ExamClass {
 }
 
 model ExamSubject {
-  id                 String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id                 String              @id @default(dbgenerated("uuidv7()")) @db.Uuid
   examId             String              @map("exam_id") @db.Uuid
   examClassId        String              @map("exam_class_id") @db.Uuid
   classId            String              @map("class_id") @db.Uuid
@@ -1724,7 +2121,7 @@ model ExamSubject {
 }
 
 model Syllabus {
-  id                String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id                String         @id @default(dbgenerated("uuidv7()")) @db.Uuid
   sessionId         String         @map("session_id") @db.Uuid
   examId            String         @map("exam_id") @db.Uuid
   classId           String         @map("class_id") @db.Uuid
@@ -1764,7 +2161,7 @@ model Syllabus {
 }
 
 model SyllabusSubject {
-  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id                String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
   syllabusId        String   @map("syllabus_id") @db.Uuid
   subjectId         String   @map("subject_id") @db.Uuid
   teacherId         String?  @map("teacher_id") @db.Uuid
@@ -1789,7 +2186,7 @@ model SyllabusSubject {
 }
 
 model SyllabusChapter {
-  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id                String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
   syllabusId        String   @map("syllabus_id") @db.Uuid
   syllabusSubjectId String   @map("syllabus_subject_id") @db.Uuid
   chapterNo         Int      @default(1) @map("chapter_no")
@@ -1816,7 +2213,7 @@ model SyllabusChapter {
 }
 
 model SyllabusTopic {
-  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id                String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
   syllabusId        String    @map("syllabus_id") @db.Uuid
   syllabusSubjectId String    @map("syllabus_subject_id") @db.Uuid
   syllabusChapterId String    @map("syllabus_chapter_id") @db.Uuid
@@ -1846,7 +2243,7 @@ model SyllabusTopic {
 }
 
 model SyllabusHistory {
-  id         String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id         String             @id @default(dbgenerated("uuidv7()")) @db.Uuid
   syllabusId String             @map("syllabus_id") @db.Uuid
   version    Int                @default(1)
   changeType SyllabusChangeType @default(SNAPSHOT_CREATED) @map("change_type")
@@ -1864,7 +2261,7 @@ model SyllabusHistory {
 }
 
 model SyllabusActivityLog {
-  id            String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id            String             @id @default(dbgenerated("uuidv7()")) @db.Uuid
   syllabusId    String             @map("syllabus_id") @db.Uuid
   entityType    String             @map("entity_type") @db.VarChar(50)
   entityId      String?            @map("entity_id") @db.Uuid

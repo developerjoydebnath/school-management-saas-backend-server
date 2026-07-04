@@ -122,5 +122,58 @@ export const PERMISSIONS = {
       DELETE: 'staff.teachers.delete',
     },
   },
+  INVENTORY: {
+    ALL: 'inventory.all',
+    VIEW: 'inventory.view',
+    CATEGORIES: {
+      ALL: 'inventory.categories.all',
+      VIEW: 'inventory.categories.view',
+      CREATE: 'inventory.categories.create',
+      EDIT: 'inventory.categories.edit',
+      DELETE: 'inventory.categories.delete',
+    },
+    ITEMS: {
+      ALL: 'inventory.items.all',
+      VIEW: 'inventory.items.view',
+      CREATE: 'inventory.items.create',
+      EDIT: 'inventory.items.edit',
+      DELETE: 'inventory.items.delete',
+    },
+    LOCATIONS: {
+      ALL: 'inventory.locations.all',
+      VIEW: 'inventory.locations.view',
+      CREATE: 'inventory.locations.create',
+      EDIT: 'inventory.locations.edit',
+      DELETE: 'inventory.locations.delete',
+    },
+    STOCK: {
+      ALL: 'inventory.stock.all',
+      VIEW: 'inventory.stock.view',
+      CREATE: 'inventory.stock.create',
+      EDIT: 'inventory.stock.edit',
+      DELETE: 'inventory.stock.delete',
+    },
+    ASSETS: {
+      ALL: 'inventory.assets.all',
+      VIEW: 'inventory.assets.view',
+      CREATE: 'inventory.assets.create',
+      EDIT: 'inventory.assets.edit',
+      DELETE: 'inventory.assets.delete',
+    },
+    MOVEMENTS: {
+      ALL: 'inventory.movements.all',
+      VIEW: 'inventory.movements.view',
+      CREATE: 'inventory.movements.create',
+      EDIT: 'inventory.movements.edit',
+      DELETE: 'inventory.movements.delete',
+    },
+    MAINTENANCE: {
+      ALL: 'inventory.maintenance.all',
+      VIEW: 'inventory.maintenance.view',
+      CREATE: 'inventory.maintenance.create',
+      EDIT: 'inventory.maintenance.edit',
+      DELETE: 'inventory.maintenance.delete',
+    },
+  },
   // Add other modules permissions here as needed
 };

@@ -33,7 +33,31 @@ await this.prismaService.user.update({ data: { refreshToken } });
 
 ## Database Schema & Isolation
 
-When designing Prisma schemas for multi-tenancy, authentication credentials (`User`) must reside in the global `public` schema, while school-specific details (`UserProfile`) must reside in the tenant's isolated schema. Additionally, primary keys should use UUIDs via `gen_random_uuid()` instead of autoincrementing integers, and timestamps must use `@db.Timestamptz`.
+When designing Prisma schemas for multi-tenancy, authentication credentials (`User`) must reside in the global `public` schema, while school-specific details (`UserProfile`) must reside in the tenant's isolated schema. Additionally, timestamps must use `@db.Timestamptz`.
+
+## UUID v7 Primary Key Standard
+
+All new Prisma models must use PostgreSQL 18 native UUID v7 defaults for primary keys:
+
+```prisma
+id String @id @default(dbgenerated("uuidv7()")) @db.Uuid
+```
+
+**Why:** UUID v7 is time-ordered, globally unique, and much friendlier to PostgreSQL B-tree indexes than random UUID v4. It improves insert locality for high-write SaaS tables while keeping IDs safe for distributed systems.
+
+Rules:
+
+1. **Use `uuidv7()` for every new primary `id` default.**
+2. **Do not use `gen_random_uuid()` or application-side UUID v4 for new primary keys.**
+3. **Do not rewrite existing UUID values when adopting UUID v7.** Existing UUID v4 rows remain valid and must be preserved.
+4. **Migrations must change column defaults only** unless the user explicitly approves a data rewrite. Use `ALTER TABLE ... ALTER COLUMN id SET DEFAULT uuidv7();`.
+5. **Do not use UUID v7 as the only business ordering rule.** List APIs should still order by the correct business timestamp, with `id` as a stable tie-breaker:
+
+```typescript
+orderBy: [{ createdAt: 'desc' }, { id: 'desc' }]
+```
+
+For business-specific lists, use the domain date first, then `id` as a tie-breaker, such as `paidAt`, `updatedAt`, `changedAt`, `version`, `startDate`, or `expiresAt` depending on the module.
 
 ## Prisma Schema Formatting Standards
 
@@ -47,7 +71,7 @@ To maintain consistency and optimize database performance across schemas, strict
 ```prisma
 // ✅ Correct
 model UserProfile {
-  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id        String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
   userId    String    @unique @map("user_id") @db.Uuid
   fullName  String    @map("full_name") @db.VarChar(255)
   phone     String?   @db.VarChar(20)
@@ -64,7 +88,7 @@ model UserProfile {
 
 // ❌ Wrong
 model UserProfile {
-  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id        String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
   user_id   String    @unique @db.Uuid // Wrong: snake_case in Prisma field
   fullName  String    @db.VarChar(255) // Wrong: missing @map("full_name")
 
@@ -74,6 +98,34 @@ model UserProfile {
 ```
 
 **Why:** Prisma translates model definitions directly into TypeScript types. Using `camelCase` keeps the application code idiomatic, while mapping to `snake_case` adheres to Postgres database conventions. Defining schemas, table names, and indexes explicitly ensures that queries are consistently fast, and multi-tenant schema isolation behaves correctly.
+
+## Prisma API Activation Checklist
+
+When adding a new Prisma-backed backend API, the task is not complete until the database schema and generated Prisma Client are both updated.
+
+Required steps:
+
+1. Add/update `schema.prisma`.
+2. Apply the database changes for the affected schema only. Do not run a broad `db push --accept-data-loss` when unrelated warnings appear; create/apply a targeted migration or SQL patch instead.
+3. Run `npx.cmd prisma generate` after schema changes.
+4. Verify the generated client has the new model delegates before testing APIs.
+5. Run a small runtime query against the new delegate/table.
+6. Restart the backend dev server if it was already running before client generation.
+
+Common failure:
+
+If every endpoint in a newly added module returns `500 Internal Server Error`, first check for stale Prisma Client or missing database tables. This usually means the code was added but `prisma generate` or the schema migration step was skipped.
+
+```powershell
+# Example checks
+npx.cmd prisma validate
+npx.cmd prisma generate
+
+# Runtime delegate check for a new model
+node -e "const {PrismaClient}=require('@prisma/client'); const p=new PrismaClient(); p.newModel.count().then(console.log).finally(()=>p.$disconnect())"
+```
+
+For PostgreSQL 18 UUID v7 work, confirm the database supports `uuidv7()` before applying migrations that depend on it.
 
 ## Multi-Identifier Login
 
