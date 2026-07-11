@@ -146,6 +146,26 @@ export class CreateAdmissionApplicationDto {
   @IsOptional()
   referenceUserId?: string;
 
+  @Allow()
+  @IsOptional()
+  admissionFeeAmount?: any;
+
+  @Allow()
+  @IsOptional()
+  paymentStatus?: string;
+
+  @Allow()
+  @IsOptional()
+  paymentMethod?: string;
+
+  @Allow()
+  @IsOptional()
+  transactionId?: string;
+
+  @Allow()
+  @IsOptional()
+  paidAt?: string;
+
   [key: string]: any;
 }
 

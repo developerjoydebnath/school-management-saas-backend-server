@@ -4,7 +4,12 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { TenantConnectionService } from 'src/cores/prisma.service';
+import { Role } from '@prisma/client';
+import * as bcrypt from 'bcrypt';
+import {
+  PrismaService,
+  TenantConnectionService,
+} from 'src/cores/prisma.service';
 import { AdmissionSettingsService } from '../settings/admission-settings.service';
 import {
   ApproveAdmissionDto,
@@ -18,6 +23,7 @@ import {
 export class AdmissionApplicationsService {
   constructor(
     private tenantConnection: TenantConnectionService,
+    private prismaService: PrismaService,
     private settingsService: AdmissionSettingsService,
   ) {}
 
@@ -52,6 +58,118 @@ export class AdmissionApplicationsService {
     const parsed = Number(value);
     if (Number.isNaN(parsed)) return null;
     return Number(Math.max(parsed, 0).toFixed(2));
+  }
+
+  private isUuid(value?: string | null) {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      String(value || ''),
+    );
+  }
+
+  private validateBangladeshMobile(value: any, fieldName: string, required = false) {
+    const mobile = String(value || '').trim();
+    if (!mobile) {
+      if (required) throw new BadRequestException(`${fieldName} is required`);
+      return null;
+    }
+    if (!/^01[3-9]\d{8}$/.test(mobile)) {
+      throw new BadRequestException(`${fieldName} must be a valid Bangladeshi mobile number`);
+    }
+    return mobile;
+  }
+
+  private validateMobileFields(dto: any) {
+    this.validateBangladeshMobile(
+      dto.fatherMobile || dto.mobile || dto.contact,
+      'Father mobile',
+      true,
+    );
+    this.validateBangladeshMobile(dto.motherMobile, 'Mother mobile');
+    this.validateBangladeshMobile(dto.guardianMobile, 'Guardian mobile');
+    this.validateBangladeshMobile(dto.localGuardianMobile, 'Local guardian mobile');
+    this.validateBangladeshMobile(
+      dto.emergencyContactPhone || dto.emergencyContact,
+      'Emergency contact phone',
+    );
+    this.validateBangladeshMobile(dto.referenceMobile, 'Reference mobile');
+  }
+
+  private async normalizeClassAndSection(dto: any, existing?: any) {
+    const prisma = this.prisma();
+    const classId =
+      dto.applyingClassId || dto.classId || dto.class || existing?.applyingClassId;
+    if (!classId || !this.isUuid(classId)) {
+      throw new BadRequestException('Valid class is required');
+    }
+
+    const hasSectionInPayload =
+      dto.sectionId !== undefined || dto.section !== undefined;
+    const sectionValue = hasSectionInPayload
+      ? dto.sectionId || dto.section || null
+      : existing?.sectionId || null;
+    if (!sectionValue) {
+      return {
+        ...dto,
+        applyingClassId: classId,
+        classId,
+        class: classId,
+        sectionId: null,
+        section: null,
+      };
+    }
+
+    if (this.isUuid(sectionValue)) {
+      return {
+        ...dto,
+        applyingClassId: classId,
+        classId,
+        class: classId,
+        sectionId: sectionValue,
+        section: sectionValue,
+      };
+    }
+
+    const section = await prisma.section.findFirst({
+      where: {
+        classId,
+        name: String(sectionValue),
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
+
+    if (!section) {
+      throw new BadRequestException('Invalid section selected');
+    }
+
+    return {
+      ...dto,
+      applyingClassId: classId,
+      classId,
+      class: classId,
+      sectionId: section.id,
+      section: section.id,
+    };
+  }
+
+  private async normalizeShift(dto: any) {
+    const shiftValue = dto.shift || dto.shiftId;
+    if (!shiftValue) return dto;
+    if (!this.isUuid(shiftValue)) return { ...dto, shift: String(shiftValue) };
+
+    const shift = await this.prisma().shift.findFirst({
+      where: { id: shiftValue, deletedAt: null },
+      select: { name: true },
+    });
+
+    if (!shift) {
+      throw new BadRequestException('Invalid shift selected');
+    }
+
+    return {
+      ...dto,
+      shift: shift.name,
+    };
   }
 
   private jsonValue(value: any) {
@@ -268,7 +386,222 @@ export class AdmissionApplicationsService {
     };
   }
 
-  private normalizeApplication(item: any) {
+  private fieldValue(application: any, field: any) {
+    const customData =
+      typeof application.customData === 'object' && application.customData
+        ? application.customData
+        : {};
+    if (field.isCustom) return customData[field.fieldKey];
+
+    const aliases: Record<string, any> = {
+      fullName: application.studentNameEn,
+      studentNameEn: application.studentNameEn,
+      dob: application.dateOfBirth,
+      dateOfBirth: application.dateOfBirth,
+      class: application.applyingClassId,
+      classId: application.applyingClassId,
+      applyingClassId: application.applyingClassId,
+      section: application.sectionId,
+      sectionId: application.sectionId,
+      session: application.sessionId,
+      sessionId: application.sessionId,
+      permanentAddress: application.permanentSameAsPresent
+        ? application.presentAddress
+        : application.permanentAddress,
+      permanentDivisionId: application.permanentSameAsPresent
+        ? application.presentDivisionId
+        : application.permanentDivisionId,
+      permanentDistrictId: application.permanentSameAsPresent
+        ? application.presentDistrictId
+        : application.permanentDistrictId,
+      permanentUpazilaId: application.permanentSameAsPresent
+        ? application.presentUpazilaId
+        : application.permanentUpazilaId,
+      mobile: application.fatherMobile,
+      fatherMobile: application.fatherMobile,
+      photo: application.photoUrl
+        ? {
+            url: application.photoUrl,
+            placeholder: application.photoPlaceholder,
+            mediaId: application.photoMediaId,
+            name: 'Student photo',
+            type: 'image',
+          }
+        : null,
+      studentPhoto: application.photoUrl
+        ? {
+            url: application.photoUrl,
+            placeholder: application.photoPlaceholder,
+            mediaId: application.photoMediaId,
+            name: 'Student photo',
+            type: 'image',
+          }
+        : null,
+      photoUrl: application.photoUrl || application.photoMediaId,
+    };
+
+    if (field.section === 'documents') {
+      const documents = Array.isArray(application.documents)
+        ? application.documents
+        : [];
+      return (
+        application[field.fieldKey] ||
+        documents.find(
+          (document: any) =>
+            document?.fieldKey === field.fieldKey ||
+            document?.type === field.fieldKey ||
+            document?.documentType === field.fieldKey,
+        )
+      );
+    }
+
+    return aliases[field.fieldKey] ?? application[field.fieldKey];
+  }
+
+  private isFilled(value: any) {
+    if (value === undefined || value === null) return false;
+    if (typeof value === 'string') return value.trim().length > 0;
+    if (Array.isArray(value)) return value.length > 0;
+    if (typeof value === 'object') return Object.keys(value).length > 0;
+    return true;
+  }
+
+  private formatDisplayDate(value: any) {
+    if (!this.isFilled(value)) return '-';
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) return String(value);
+    return date.toISOString().slice(0, 10);
+  }
+
+  private async sessionNameMap(sessionIds: string[]) {
+    const uniqueIds = Array.from(new Set(sessionIds.filter(Boolean)));
+    if (uniqueIds.length === 0) return new Map<string, string>();
+
+    const sessions = await this.prisma().academicSession.findMany({
+      where: { id: { in: uniqueIds } },
+      select: { id: true, name: true, year: true },
+    });
+
+    return new Map(
+      sessions.map((session) => [
+        session.id,
+        session.name || String(session.year || session.id),
+      ]),
+    );
+  }
+
+  private displayValue(application: any, field: any) {
+    const value = this.fieldValue(application, field);
+    if (!this.isFilled(value)) return '-';
+
+    const relationDisplays: Record<string, any> = {
+      applyingClassId: application.applyingClass?.enName,
+      classId: application.applyingClass?.enName,
+      sectionId: application.section?.name,
+      sessionId: application.sessionName || application.session?.name,
+      presentDivisionId: application.presentDivision?.enName || application.presentDivision?.bnName,
+      presentDistrictId: application.presentDistrict?.enName || application.presentDistrict?.bnName,
+      presentUpazilaId: application.presentUpazila?.enName || application.presentUpazila?.bnName,
+      permanentDivisionId: application.permanentSameAsPresent
+        ? application.presentDivision?.enName || application.presentDivision?.bnName
+        : application.permanentDivision?.enName || application.permanentDivision?.bnName,
+      permanentDistrictId: application.permanentSameAsPresent
+        ? application.presentDistrict?.enName || application.presentDistrict?.bnName
+        : application.permanentDistrict?.enName || application.permanentDistrict?.bnName,
+      permanentUpazilaId: application.permanentSameAsPresent
+        ? application.presentUpazila?.enName || application.presentUpazila?.bnName
+        : application.permanentUpazila?.enName || application.permanentUpazila?.bnName,
+      permanentAddress: application.permanentSameAsPresent
+        ? application.presentAddress
+        : application.permanentAddress,
+    };
+    if (relationDisplays[field.fieldKey]) return relationDisplays[field.fieldKey];
+
+    if (field.fieldType === 'file') {
+      if (typeof value === 'object') return value.name || value.fileName || value.url || 'Uploaded';
+      return 'Uploaded';
+    }
+    if (field.fieldType === 'date' || value instanceof Date) return this.formatDisplayDate(value);
+    if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+    if (typeof value === 'object' && typeof value.toString === 'function') {
+      const text = value.toString();
+      if (text !== '[object Object]') return text;
+    }
+    if (typeof value === 'object') return JSON.stringify(value);
+    return String(value);
+  }
+
+  private async visibleCompletionFields(sessionId: string) {
+    const settings = await this.prisma().admissionSettings.findFirst({
+      where: { sessionId, deletedAt: null },
+      include: {
+        fieldConfigs: {
+          where: { deletedAt: null },
+          orderBy: [{ section: 'asc' }, { sortOrder: 'asc' }],
+        },
+      },
+    });
+
+    const fields = ((settings as any)?.fieldConfigs || []).filter((field: any) => {
+      const fastShown = field.showInFastMode ?? field.isShown;
+      const fullShown = field.showInFullMode ?? field.isShown;
+      return fastShown || fullShown;
+    });
+
+    const seen = new Set<string>();
+    return fields.filter((field: any) => {
+      const key = `${field.section}:${field.fieldKey}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+
+  private completionSummary(application: any, fields: any[]) {
+    const completedFields = fields.filter((field) =>
+      this.isFilled(this.fieldValue(application, field)),
+    ).length;
+    const totalFields = fields.length;
+    const completionPercent = totalFields
+      ? Math.round((completedFields / totalFields) * 100)
+      : 0;
+
+    return {
+      totalFields,
+      completedFields,
+      completionPercent,
+      missingFields: fields
+        .filter((field) => !this.isFilled(this.fieldValue(application, field)))
+        .map((field) => ({
+          fieldKey: field.fieldKey,
+          label: field.label,
+          labelBn: field.labelBn,
+          section: field.section,
+        })),
+    };
+  }
+
+  private visibleFieldGroups(application: any, fields: any[]) {
+    return fields.reduce((groups: any[], field) => {
+      let group = groups.find((item) => item.section === field.section);
+      if (!group) {
+        group = { section: field.section, fields: [] };
+        groups.push(group);
+      }
+      group.fields.push({
+        fieldKey: field.fieldKey,
+        label: field.label,
+        labelBn: field.labelBn,
+        fieldType: field.fieldType,
+        section: field.section,
+        value: this.fieldValue(application, field),
+        displayValue: this.displayValue(application, field),
+      });
+      return groups;
+    }, []);
+  }
+
+  private normalizeApplication(item: any, extras: any = {}) {
     if (!item) return item;
     return {
       ...item,
@@ -277,10 +610,37 @@ export class AdmissionApplicationsService {
       class: item.applyingClass?.enName || item.applyingClassId,
       classId: item.applyingClassId,
       section: item.section?.name || item.sectionId,
-      session: item.sessionId,
+      session: extras.sessionName || item.sessionName || item.sessionId,
       mobile: item.fatherMobile,
       contact: item.fatherMobile,
       date: item.submittedAt || item.createdAt,
+      ...extras,
+    };
+  }
+
+  private normalizeApplicationListItem(item: any, completion: any, sessionName?: string) {
+    return {
+      id: item.id,
+      applicationNo: item.applicationNo,
+      fullName: item.studentNameEn,
+      studentName: item.studentNameEn,
+      fatherName: item.fatherName,
+      fatherMobile: item.fatherMobile,
+      guardianName: item.fatherName,
+      mobile: item.fatherMobile,
+      contact: item.fatherMobile,
+      status: item.status,
+      source: item.source,
+      paymentStatus: item.paymentStatus,
+      submittedAt: item.submittedAt,
+      date: item.submittedAt || item.createdAt,
+      class: item.applyingClass?.enName || item.applyingClassId,
+      classId: item.applyingClassId,
+      section: item.section?.name || null,
+      sectionId: item.sectionId,
+      session: sessionName || item.sessionId,
+      sessionId: item.sessionId,
+      completion,
     };
   }
 
@@ -342,13 +702,17 @@ export class AdmissionApplicationsService {
 
   async create(dto: CreateAdmissionApplicationDto, userId?: string) {
     const prisma = this.prisma();
-    const sessionId = dto.sessionId || dto.session;
+    const normalizedDto = await this.normalizeShift(
+      await this.normalizeClassAndSection(dto),
+    );
+    this.validateMobileFields(normalizedDto);
+    const sessionId = normalizedDto.sessionId || normalizedDto.session;
     if (!sessionId) throw new BadRequestException('Session is required');
     const settingsResponse = await this.settingsService.getBySession(sessionId, userId);
     const settings = settingsResponse.data;
-    const mode = dto.admissionMode || settings.admissionMode || 'fast';
-    const feeSummary = await this.calculateAdmissionFee(dto, userId);
-    const reference = await this.resolveReference(dto);
+    const mode = normalizedDto.admissionMode || settings.admissionMode || 'fast';
+    const feeSummary = await this.calculateAdmissionFee(normalizedDto, userId);
+    const reference = await this.resolveReference(normalizedDto);
     const session = await prisma.academicSession.findUnique({
       where: { id: sessionId },
       select: { year: true },
@@ -365,13 +729,13 @@ export class AdmissionApplicationsService {
       return tx.admissionApplication.create({
         data: {
           ...this.mapApplicationData(
-            { ...dto, admissionMode: mode },
+            { ...normalizedDto, admissionMode: mode },
             userId,
             feeSummary,
             reference,
           ),
           applicationNo,
-          source: this.normalizeSource(dto.source, mode),
+          source: this.normalizeSource(normalizedDto.source, mode),
           createdBy: userId || null,
         },
         include: this.detailsInclude(),
@@ -415,16 +779,32 @@ export class AdmissionApplicationsService {
     const [items, total] = await Promise.all([
       prisma.admissionApplication.findMany({
         where,
-        select: this.listSelect(),
+        include: this.detailsInclude(),
         skip: (page - 1) * limit,
         take: limit,
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       }),
       prisma.admissionApplication.count({ where }),
     ]);
+    const fieldsBySession = new Map<string, any[]>();
+    for (const item of items) {
+      if (!fieldsBySession.has(item.sessionId)) {
+        fieldsBySession.set(
+          item.sessionId,
+          await this.visibleCompletionFields(item.sessionId),
+        );
+      }
+    }
+    const sessionNames = await this.sessionNameMap(items.map((item) => item.sessionId));
     const totalPages = Math.ceil(total / limit);
     return this.response('Admission applications retrieved successfully', {
-      items: items.map((item) => this.normalizeApplication(item)),
+      items: items.map((item) =>
+        this.normalizeApplicationListItem(
+          item,
+          this.completionSummary(item, fieldsBySession.get(item.sessionId) || []),
+          sessionNames.get(item.sessionId),
+        ),
+      ),
       meta: {
         page,
         limit,
@@ -442,20 +822,76 @@ export class AdmissionApplicationsService {
       include: this.detailsInclude(),
     });
     if (!application) throw new NotFoundException('Admission application not found');
+    const fields = await this.visibleCompletionFields(application.sessionId);
+    const sessionNames = await this.sessionNameMap([application.sessionId]);
+    const applicationWithSession = {
+      ...application,
+      sessionName: sessionNames.get(application.sessionId),
+    };
     return this.response(
       'Admission application retrieved successfully',
-      this.normalizeApplication(application),
+      this.normalizeApplication(applicationWithSession, {
+        sessionName: sessionNames.get(application.sessionId),
+        completion: this.completionSummary(applicationWithSession, fields),
+        visibleFieldGroups: this.visibleFieldGroups(applicationWithSession, fields),
+      }),
     );
   }
 
   async update(id: string, dto: UpdateAdmissionApplicationDto, userId?: string) {
-    await this.findOne(id);
-    const feeSummary = await this.calculateAdmissionFee(dto, userId);
-    const reference = await this.resolveReference(dto);
+    const existingResponse = await this.findOne(id);
+    const mergedDto = {
+      ...existingResponse.data,
+      ...dto,
+      customData:
+        dto.customData !== undefined
+          ? dto.customData
+          : existingResponse.data?.customData,
+      documents:
+        dto.documents !== undefined
+          ? dto.documents
+          : existingResponse.data?.documents,
+      photoUrl:
+        dto.photoUrl !== undefined
+          ? dto.photoUrl
+          : existingResponse.data?.photoUrl,
+      photoPlaceholder:
+        dto.photoPlaceholder !== undefined
+          ? dto.photoPlaceholder
+          : existingResponse.data?.photoPlaceholder,
+      photoMediaId:
+        dto.photoMediaId !== undefined
+          ? dto.photoMediaId
+          : existingResponse.data?.photoMediaId,
+      paidAt:
+        dto.paidAt !== undefined ? dto.paidAt : existingResponse.data?.paidAt,
+      paymentStatus:
+        dto.paymentStatus !== undefined
+          ? dto.paymentStatus
+          : existingResponse.data?.paymentStatus,
+      paymentMethod:
+        dto.paymentMethod !== undefined
+          ? dto.paymentMethod
+          : existingResponse.data?.paymentMethod,
+      transactionId:
+        dto.transactionId !== undefined
+          ? dto.transactionId
+          : existingResponse.data?.transactionId,
+      admissionFeeAmount:
+        dto.admissionFeeAmount !== undefined
+          ? dto.admissionFeeAmount
+          : existingResponse.data?.admissionFeeAmount,
+    };
+    const normalizedDto = await this.normalizeShift(
+      await this.normalizeClassAndSection(mergedDto, existingResponse.data),
+    );
+    this.validateMobileFields(normalizedDto);
+    const feeSummary = await this.calculateAdmissionFee(normalizedDto, userId);
+    const reference = await this.resolveReference(normalizedDto);
     const updated = await this.prisma().admissionApplication.update({
       where: { id },
       data: {
-        ...this.mapApplicationData(dto, userId, feeSummary, reference),
+        ...this.mapApplicationData(normalizedDto, userId, feeSummary, reference),
       },
       include: this.detailsInclude(),
     });
@@ -508,13 +944,58 @@ export class AdmissionApplicationsService {
     });
     if (!session) throw new BadRequestException('Session not found');
 
+    const publicClient = this.prismaService.client;
+    const schemaName = this.tenantConnection.getTenantSchema();
+
     const createdStudent = await prisma.$transaction(async (tx) => {
       const totalStudents = await tx.student.count({
         where: { currentSessionId: application.sessionId },
       });
       const studentIdNo = `STU-${session.year}-${String(totalStudents + 1).padStart(4, '0')}`;
+      const hashedPassword = await bcrypt.hash(studentIdNo, 10);
+      const user = await publicClient.user.create({
+        data: {
+          studentCode: studentIdNo,
+          phone: application.fatherMobile || null,
+          password: hashedPassword,
+          schemaName,
+          role: Role.STUDENT,
+        },
+      });
+
+      const nameParts = String(application.studentNameEn || studentIdNo)
+        .trim()
+        .split(/\s+/);
+      await publicClient.userProfile.create({
+        data: {
+          userId: user.id,
+          firstName: nameParts[0] || studentIdNo,
+          lastName: nameParts.length > 1 ? nameParts.slice(1).join(' ') : '',
+          gender: application.gender,
+          dob: application.dateOfBirth,
+          bloodGroup: application.bloodGroup,
+          religion: application.religion,
+          nationality: application.nationality,
+          birthCertificateNo: application.birthRegistrationNo,
+          phone: application.fatherMobile,
+          photoUrl: application.photoUrl,
+          photoPlaceholder: application.photoPlaceholder,
+          presentDivisionId: application.presentDivisionId,
+          presentDistrictId: application.presentDistrictId,
+          presentUpazilaId: application.presentUpazilaId,
+          presentAddress: application.presentAddress,
+          permanentDivisionId: application.permanentDivisionId,
+          permanentDistrictId: application.permanentDistrictId,
+          permanentUpazilaId: application.permanentUpazilaId,
+          permanentAddress: application.permanentAddress,
+          emergencyContactName: application.emergencyContactName,
+          emergencyContactPhone: application.emergencyContactPhone,
+        },
+      });
+
       const student = await tx.student.create({
         data: {
+          userId: user.id,
           admissionApplicationId: application.id,
           studentIdNo,
           fullNameEn: application.studentNameEn,
