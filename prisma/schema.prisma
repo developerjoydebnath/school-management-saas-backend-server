@@ -1061,6 +1061,10 @@ model Division {
   userProfilesPresent   UserProfile[] @relation("UserProfilePresentDivision")
   userProfilesPermanent UserProfile[] @relation("UserProfilePermanentDivision")
   teachers              Teacher[]
+  applicationPresent    AdmissionApplication[] @relation("ApplicationPresentDivision")
+  applicationPermanent  AdmissionApplication[] @relation("ApplicationPermanentDivision")
+  studentPresent        Student[] @relation("StudentPresentDivision")
+  studentPermanent      Student[] @relation("StudentPermanentDivision")
 
   @@map("divisions")
   @@schema("public")
@@ -1081,6 +1085,10 @@ model District {
   userProfilesPresent   UserProfile[] @relation("UserProfilePresentDistrict")
   userProfilesPermanent UserProfile[] @relation("UserProfilePermanentDistrict")
   teachers              Teacher[]
+  applicationPresent    AdmissionApplication[] @relation("ApplicationPresentDistrict")
+  applicationPermanent  AdmissionApplication[] @relation("ApplicationPermanentDistrict")
+  studentPresent        Student[] @relation("StudentPresentDistrict")
+  studentPermanent      Student[] @relation("StudentPermanentDistrict")
 
   @@index([divisionId])
   @@map("districts")
@@ -1102,6 +1110,10 @@ model Upazila {
   userProfilesPresent   UserProfile[] @relation("UserProfilePresentUpazila")
   userProfilesPermanent UserProfile[] @relation("UserProfilePermanentUpazila")
   teachers              Teacher[]
+  applicationPresent    AdmissionApplication[] @relation("ApplicationPresentUpazila")
+  applicationPermanent  AdmissionApplication[] @relation("ApplicationPermanentUpazila")
+  studentPresent        Student[] @relation("StudentPresentUpazila")
+  studentPermanent      Student[] @relation("StudentPermanentUpazila")
 
   @@index([districtId])
   @@map("upazilas")
@@ -1200,6 +1212,9 @@ model Class {
   examClasses  ExamClass[]
   examSubjects ExamSubject[]
   syllabuses   Syllabus[]
+  admissionApplications AdmissionApplication[]
+  admissionFeeAmounts AdmissionFeeHeadClassAmount[]
+  students Student[]
 
   @@index([classRoomId])
   @@index([shiftId])
@@ -1306,6 +1321,8 @@ model Section {
   shift      Shift       @relation(fields: [shiftId], references: [id], onDelete: Restrict)
   timetables Timetable[]
   syllabuses Syllabus[]
+  admissionApplications AdmissionApplication[]
+  students Student[]
 
   @@index([classId])
   @@index([classId, name])
@@ -1447,9 +1464,6 @@ model InventoryLocation {
   locationType InventoryLocationType @map("location_type")
   name         String                @db.VarChar(150)
   code         String?               @db.VarChar(60)
-  building     String?               @db.VarChar(100)
-  floor        String?               @db.VarChar(50)
-  roomNo       String?               @map("room_no") @db.VarChar(50)
   classRoomId  String?               @map("class_room_id") @db.Uuid
   description  String?               @db.Text
   status       String                @default("ACTIVE") @db.VarChar(50)
@@ -1546,6 +1560,8 @@ model InventoryAsset {
   warrantyPeriodUnit String?   @map("warranty_period_unit") @db.VarChar(20)
   warrantyExpires    DateTime? @map("warranty_expires") @db.Date
   warrantyNotes      String?   @map("warranty_notes") @db.VarChar(255)
+  imageUrl           String?   @map("image_url") @db.VarChar(500)
+  imagePlaceholder   String?   @map("image_placeholder") @db.Text
 
   currentValue      Decimal?  @map("current_value") @db.Decimal(12, 2)
   lastDepreciatedAt DateTime? @map("last_depreciated_at") @db.Date
@@ -1816,6 +1832,385 @@ model Department {
 // ─────────────────────────────────────────────────────────────────────────────
 // TEACHERS
 // ─────────────────────────────────────────────────────────────────────────────
+
+model AdmissionSettings {
+  id String @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  sessionId String @unique @map("session_id") @db.Uuid
+  admissionMode String @default("fast") @map("admission_mode") @db.VarChar(10)
+  onlinePortalEnabled Boolean @default(false) @map("online_portal_enabled")
+  onlinePortalSlug String? @map("online_portal_slug") @db.VarChar(100)
+  onlinePortalOpensAt DateTime? @map("online_portal_opens_at") @db.Timestamptz
+  onlinePortalClosesAt DateTime? @map("online_portal_closes_at") @db.Timestamptz
+  draftEnabled Boolean @default(true) @map("draft_enabled")
+  discountEnabled Boolean @default(false) @map("discount_enabled")
+  discountType String @default("fixed_amount") @map("discount_type") @db.VarChar(20)
+  discountScope String @default("required_total") @map("discount_scope") @db.VarChar(30)
+  discountValue Decimal @default(0) @map("discount_value") @db.Decimal(12, 2)
+  discountMaxAmount Decimal? @map("discount_max_amount") @db.Decimal(12, 2)
+  manualDiscountEnabled Boolean @default(true) @map("manual_discount_enabled")
+  quotaDiscountEnabled Boolean @default(false) @map("quota_discount_enabled")
+  quotaDiscountRules Json @default("[]") @map("quota_discount_rules")
+  referenceEnabled Boolean @default(true) @map("reference_enabled")
+  defaultAdmissionFee Decimal? @map("default_admission_fee") @db.Decimal(10, 2)
+  applicationPrefix String @default("ADM") @map("application_prefix") @db.VarChar(10)
+  applicationNoSeq Int @default(0) @map("application_no_seq")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  createdBy String? @map("created_by") @db.Uuid
+  updatedBy String? @map("updated_by") @db.Uuid
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz
+  deletedBy String? @map("deleted_by") @db.Uuid
+  fieldConfigs AdmissionFieldConfig[]
+  feeHeads AdmissionFeeHead[]
+
+  @@index([admissionMode])
+  @@index([onlinePortalSlug])
+  @@index([deletedAt])
+  @@map("admission_settings")
+  @@schema("tenant")
+}
+
+model AdmissionFieldConfig {
+  id String @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  settingsId String @map("settings_id") @db.Uuid
+  settings AdmissionSettings @relation(fields: [settingsId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  fieldKey String @map("field_key") @db.VarChar(100)
+  section String @db.VarChar(40)
+  label String @db.VarChar(150)
+  labelBn String? @map("label_bn") @db.VarChar(150)
+  fieldType String @map("field_type") @db.VarChar(20)
+  options Json?
+  placeholder String? @db.VarChar(200)
+  helpText String? @map("help_text") @db.VarChar(300)
+  isSystem Boolean @default(false) @map("is_system")
+  isSystemLocked Boolean @default(false) @map("is_system_locked")
+  isShown Boolean @default(true) @map("is_shown")
+  isRequired Boolean @default(false) @map("is_required")
+  showInFastMode Boolean @default(true) @map("show_in_fast_mode")
+  showInFullMode Boolean @default(true) @map("show_in_full_mode")
+  requiredInFastMode Boolean @default(false) @map("required_in_fast_mode")
+  requiredInFullMode Boolean @default(false) @map("required_in_full_mode")
+  isCustom Boolean @default(false) @map("is_custom")
+  dependsOnFieldKey String? @map("depends_on_field_key") @db.VarChar(100)
+  sortOrder Int @default(0) @map("sort_order")
+  minLength Int? @map("min_length")
+  maxLength Int? @map("max_length")
+  minValue Decimal? @map("min_value") @db.Decimal(12, 2)
+  maxValue Decimal? @map("max_value") @db.Decimal(12, 2)
+  regexPattern String? @map("regex_pattern") @db.VarChar(300)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  createdBy String? @map("created_by") @db.Uuid
+  updatedBy String? @map("updated_by") @db.Uuid
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz
+  deletedBy String? @map("deleted_by") @db.Uuid
+
+  @@unique([settingsId, fieldKey])
+  @@index([settingsId, section])
+  @@index([settingsId, isCustom])
+  @@index([deletedAt])
+  @@map("admission_field_configs")
+  @@schema("tenant")
+}
+
+model AdmissionFeeHead {
+  id String @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  settingsId String @map("settings_id") @db.Uuid
+  settings AdmissionSettings @relation(fields: [settingsId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  name String @db.VarChar(120)
+  nameBn String? @map("name_bn") @db.VarChar(120)
+  code String @db.VarChar(60)
+  type String @default("one_time") @db.VarChar(30)
+  amount Decimal @default(0) @db.Decimal(12, 2)
+  isSystem Boolean @default(false) @map("is_system")
+  isShown Boolean @default(true) @map("is_shown")
+  isRequired Boolean @default(false) @map("is_required")
+  sortOrder Int @default(0) @map("sort_order")
+  description String? @db.Text
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  createdBy String? @map("created_by") @db.Uuid
+  updatedBy String? @map("updated_by") @db.Uuid
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz
+  deletedBy String? @map("deleted_by") @db.Uuid
+  classAmounts AdmissionFeeHeadClassAmount[]
+
+  @@unique([settingsId, code])
+  @@index([settingsId])
+  @@index([settingsId, isShown])
+  @@index([settingsId, isRequired])
+  @@index([deletedAt])
+  @@map("admission_fee_heads")
+  @@schema("tenant")
+}
+
+model AdmissionFeeHeadClassAmount {
+  id String @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  feeHeadId String @map("fee_head_id") @db.Uuid
+  classId String @map("class_id") @db.Uuid
+  amount Decimal @db.Decimal(12, 2)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  createdBy String? @map("created_by") @db.Uuid
+  updatedBy String? @map("updated_by") @db.Uuid
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz
+  deletedBy String? @map("deleted_by") @db.Uuid
+  feeHead AdmissionFeeHead @relation(fields: [feeHeadId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  class Class @relation(fields: [classId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([feeHeadId, classId])
+  @@index([classId])
+  @@index([deletedAt])
+  @@map("admission_fee_head_class_amounts")
+  @@schema("tenant")
+}
+
+model AdmissionApplication {
+  id String @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  applicationNo String @map("application_no") @db.VarChar(30)
+  sessionId String @map("session_id") @db.Uuid
+  status String @default("pending") @db.VarChar(20)
+  source String @default("admin_fast") @db.VarChar(20)
+  admissionMode String @default("fast") @map("admission_mode") @db.VarChar(10)
+  currentStep String? @map("current_step") @db.VarChar(40)
+  completionPercent Int @default(0) @map("completion_percent")
+  isDraft Boolean @default(false) @map("is_draft")
+  submittedAt DateTime? @map("submitted_at") @db.Timestamptz
+  reviewedAt DateTime? @map("reviewed_at") @db.Timestamptz
+  reviewedBy String? @map("reviewed_by") @db.Uuid
+  rejectionReason String? @map("rejection_reason") @db.Text
+  waitlistRank Int? @map("waitlist_rank")
+  approvedAt DateTime? @map("approved_at") @db.Timestamptz
+  approvedBy String? @map("approved_by") @db.Uuid
+  studentId String? @unique @map("student_id") @db.Uuid
+  student Student? @relation(fields: [studentId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  studentNameEn String @map("student_name_en") @db.VarChar(255)
+  studentNameBn String? @map("student_name_bn") @db.VarChar(255)
+  dateOfBirth DateTime @map("date_of_birth") @db.Date
+  gender String @db.VarChar(20)
+  birthRegistrationNo String? @map("birth_registration_no") @db.VarChar(30)
+  bloodGroup String? @map("blood_group") @db.VarChar(5)
+  religion String? @db.VarChar(50)
+  nationality String @default("Bangladeshi") @db.VarChar(50)
+  specialQuota Json? @map("special_quota")
+  photoUrl String? @map("photo_url") @db.VarChar(500)
+  photoPlaceholder String? @map("photo_placeholder") @db.Text
+  photoMediaId String? @map("photo_media_id") @db.Uuid
+
+  applyingClassId String @map("applying_class_id") @db.Uuid
+  applyingClass Class @relation(fields: [applyingClassId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  sectionId String? @map("section_id") @db.Uuid
+  section Section? @relation(fields: [sectionId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  admissionType String @default("new") @map("admission_type") @db.VarChar(20)
+  mediumOrVersion String? @map("medium_or_version") @db.VarChar(20)
+  shift String? @db.VarChar(20)
+  groupOrDept String? @map("group_or_dept") @db.VarChar(30)
+  previousSchoolName String? @map("previous_school_name") @db.VarChar(255)
+  previousSchoolEiin String? @map("previous_school_eiin") @db.VarChar(20)
+  transferCertificateNo String? @map("transfer_certificate_no") @db.VarChar(50)
+  lastClassCompleted String? @map("last_class_completed") @db.VarChar(20)
+  lastExamResult String? @map("last_exam_result") @db.VarChar(20)
+
+  fatherName String @map("father_name") @db.VarChar(255)
+  fatherNameBn String? @map("father_name_bn") @db.VarChar(255)
+  fatherNid String? @map("father_nid") @db.VarChar(20)
+  fatherOccupation String? @map("father_occupation") @db.VarChar(100)
+  fatherMobile String @map("father_mobile") @db.VarChar(20)
+  motherName String? @map("mother_name") @db.VarChar(255)
+  motherNameBn String? @map("mother_name_bn") @db.VarChar(255)
+  motherNid String? @map("mother_nid") @db.VarChar(20)
+  motherOccupation String? @map("mother_occupation") @db.VarChar(100)
+  motherMobile String? @map("mother_mobile") @db.VarChar(20)
+  guardianName String? @map("guardian_name") @db.VarChar(255)
+  guardianRelation String? @map("guardian_relation") @db.VarChar(50)
+  guardianNid String? @map("guardian_nid") @db.VarChar(20)
+  guardianMobile String? @map("guardian_mobile") @db.VarChar(20)
+  localGuardianName String? @map("local_guardian_name") @db.VarChar(255)
+  localGuardianMobile String? @map("local_guardian_mobile") @db.VarChar(20)
+  localGuardianAddress String? @map("local_guardian_address") @db.Text
+  emergencyContactName String? @map("emergency_contact_name") @db.VarChar(255)
+  emergencyContactPhone String? @map("emergency_contact_phone") @db.VarChar(20)
+  monthlyFamilyIncome Decimal? @map("monthly_family_income") @db.Decimal(10, 2)
+
+  presentAddress String? @map("present_address") @db.Text
+  presentDivisionId Int? @map("present_division_id")
+  presentDistrictId Int? @map("present_district_id")
+  presentUpazilaId Int? @map("present_upazila_id")
+  permanentSameAsPresent Boolean @default(false) @map("permanent_same_as_present")
+  permanentAddress String? @map("permanent_address") @db.Text
+  permanentDivisionId Int? @map("permanent_division_id")
+  permanentDistrictId Int? @map("permanent_district_id")
+  permanentUpazilaId Int? @map("permanent_upazila_id")
+  presentDivision Division? @relation("ApplicationPresentDivision", fields: [presentDivisionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  presentDistrict District? @relation("ApplicationPresentDistrict", fields: [presentDistrictId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  presentUpazila Upazila? @relation("ApplicationPresentUpazila", fields: [presentUpazilaId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  permanentDivision Division? @relation("ApplicationPermanentDivision", fields: [permanentDivisionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  permanentDistrict District? @relation("ApplicationPermanentDistrict", fields: [permanentDistrictId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  permanentUpazila Upazila? @relation("ApplicationPermanentUpazila", fields: [permanentUpazilaId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  documents Json?
+  allergies String? @db.Text
+  medicalConditions String? @map("medical_conditions") @db.Text
+  disabilityType String? @map("disability_type") @db.VarChar(100)
+  immunizationComplete Boolean? @map("immunization_complete")
+  admissionFeeAmount Decimal? @map("admission_fee_amount") @db.Decimal(10, 2)
+  admissionFeeSubtotal Decimal? @map("admission_fee_subtotal") @db.Decimal(10, 2)
+  admissionDiscountAmount Decimal? @map("admission_discount_amount") @db.Decimal(10, 2)
+  admissionPayableAmount Decimal? @map("admission_payable_amount") @db.Decimal(10, 2)
+  discountType String? @map("discount_type") @db.VarChar(20)
+  discountScope String? @map("discount_scope") @db.VarChar(30)
+  discountValue Decimal? @map("discount_value") @db.Decimal(12, 2)
+  discountSource String? @map("discount_source") @db.VarChar(20)
+  discountReason String? @map("discount_reason") @db.VarChar(255)
+  referenceUserId String? @map("reference_user_id") @db.Uuid
+  referenceName String? @map("reference_name") @db.VarChar(255)
+  referenceMobile String? @map("reference_mobile") @db.VarChar(20)
+  paymentStatus String @default("pending") @map("payment_status") @db.VarChar(20)
+  paymentMethod String? @map("payment_method") @db.VarChar(20)
+  transactionId String? @map("transaction_id") @db.VarChar(100)
+  paidAt DateTime? @map("paid_at") @db.Timestamptz
+  customData Json? @map("custom_data")
+  notes String? @db.Text
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  createdBy String? @map("created_by") @db.Uuid
+  updatedBy String? @map("updated_by") @db.Uuid
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz
+  deletedBy String? @map("deleted_by") @db.Uuid
+
+  @@unique([applicationNo])
+  @@index([status])
+  @@index([sessionId])
+  @@index([applyingClassId])
+  @@index([sectionId])
+  @@index([source])
+  @@index([paymentStatus])
+  @@index([presentDivisionId])
+  @@index([presentDistrictId])
+  @@index([presentUpazilaId])
+  @@index([deletedAt])
+  @@map("admission_applications")
+  @@schema("tenant")
+}
+
+model Student {
+  id String @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  userId String? @unique @map("user_id") @db.Uuid
+  admissionApplicationId String? @unique @map("admission_application_id") @db.Uuid
+  admissionApplication AdmissionApplication?
+  studentIdNo String @map("student_id_no") @db.VarChar(30)
+
+  fullNameEn String @map("full_name_en") @db.VarChar(255)
+  fullNameBn String? @map("full_name_bn") @db.VarChar(255)
+  dateOfBirth DateTime @map("date_of_birth") @db.Date
+  gender String @db.VarChar(20)
+  birthRegistrationNo String? @map("birth_registration_no") @db.VarChar(30)
+  bloodGroup String? @map("blood_group") @db.VarChar(5)
+  religion String? @db.VarChar(50)
+  nationality String @default("Bangladeshi") @db.VarChar(50)
+  specialQuota Json? @map("special_quota")
+  photoUrl String? @map("photo_url") @db.VarChar(500)
+  photoPlaceholder String? @map("photo_placeholder") @db.Text
+  photoMediaId String? @map("photo_media_id") @db.Uuid
+  classId String @map("class_id") @db.Uuid
+  class Class @relation(fields: [classId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  sectionId String? @map("section_id") @db.Uuid
+  section Section? @relation(fields: [sectionId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  currentSessionId String @map("current_session_id") @db.Uuid
+  rollNumber String? @map("roll_number") @db.VarChar(20)
+  mediumOrVersion String? @map("medium_or_version") @db.VarChar(20)
+  shift String? @db.VarChar(20)
+  groupOrDept String? @map("group_or_dept") @db.VarChar(30)
+  admissionType String @default("new") @map("admission_type") @db.VarChar(20)
+  admissionDate DateTime @map("admission_date") @db.Date
+  status String @default("active") @db.VarChar(20)
+  statusReason String? @map("status_reason") @db.Text
+  statusChangedAt DateTime? @map("status_changed_at") @db.Timestamptz
+  previousSchoolName String? @map("previous_school_name") @db.VarChar(255)
+  previousSchoolEiin String? @map("previous_school_eiin") @db.VarChar(20)
+  transferCertificateNo String? @map("transfer_certificate_no") @db.VarChar(50)
+  lastClassCompleted String? @map("last_class_completed") @db.VarChar(20)
+  lastExamResult String? @map("last_exam_result") @db.VarChar(20)
+  globalPersonId String? @map("global_person_id") @db.Uuid
+  transferredFrom String? @map("transferred_from") @db.VarChar(63)
+  transferredTo String? @map("transferred_to") @db.VarChar(63)
+  transferDate DateTime? @map("transfer_date") @db.Date
+  fatherName String @map("father_name") @db.VarChar(255)
+  fatherNameBn String? @map("father_name_bn") @db.VarChar(255)
+  fatherNid String? @map("father_nid") @db.VarChar(20)
+  fatherOccupation String? @map("father_occupation") @db.VarChar(100)
+  fatherMobile String @map("father_mobile") @db.VarChar(20)
+  motherName String? @map("mother_name") @db.VarChar(255)
+  motherNameBn String? @map("mother_name_bn") @db.VarChar(255)
+  motherNid String? @map("mother_nid") @db.VarChar(20)
+  motherOccupation String? @map("mother_occupation") @db.VarChar(100)
+  motherMobile String? @map("mother_mobile") @db.VarChar(20)
+  guardianName String? @map("guardian_name") @db.VarChar(255)
+  guardianRelation String? @map("guardian_relation") @db.VarChar(50)
+  guardianNid String? @map("guardian_nid") @db.VarChar(20)
+  guardianMobile String? @map("guardian_mobile") @db.VarChar(20)
+  localGuardianName String? @map("local_guardian_name") @db.VarChar(255)
+  localGuardianMobile String? @map("local_guardian_mobile") @db.VarChar(20)
+  localGuardianAddress String? @map("local_guardian_address") @db.Text
+  emergencyContactName String? @map("emergency_contact_name") @db.VarChar(255)
+  emergencyContactPhone String? @map("emergency_contact_phone") @db.VarChar(20)
+  monthlyFamilyIncome Decimal? @map("monthly_family_income") @db.Decimal(10, 2)
+  presentAddress String? @map("present_address") @db.Text
+  presentDivisionId Int? @map("present_division_id")
+  presentDistrictId Int? @map("present_district_id")
+  presentUpazilaId Int? @map("present_upazila_id")
+  permanentSameAsPresent Boolean @default(false) @map("permanent_same_as_present")
+  permanentAddress String? @map("permanent_address") @db.Text
+  permanentDivisionId Int? @map("permanent_division_id")
+  permanentDistrictId Int? @map("permanent_district_id")
+  permanentUpazilaId Int? @map("permanent_upazila_id")
+  presentDivision Division? @relation("StudentPresentDivision", fields: [presentDivisionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  presentDistrict District? @relation("StudentPresentDistrict", fields: [presentDistrictId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  presentUpazila Upazila? @relation("StudentPresentUpazila", fields: [presentUpazilaId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  permanentDivision Division? @relation("StudentPermanentDivision", fields: [permanentDivisionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  permanentDistrict District? @relation("StudentPermanentDistrict", fields: [permanentDistrictId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  permanentUpazila Upazila? @relation("StudentPermanentUpazila", fields: [permanentUpazilaId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  documents Json?
+  allergies String? @db.Text
+  medicalConditions String? @map("medical_conditions") @db.Text
+  disabilityType String? @map("disability_type") @db.VarChar(100)
+  immunizationComplete Boolean? @map("immunization_complete")
+  admissionFeeAmount Decimal? @map("admission_fee_amount") @db.Decimal(10, 2)
+  admissionFeeSubtotal Decimal? @map("admission_fee_subtotal") @db.Decimal(10, 2)
+  admissionDiscountAmount Decimal? @map("admission_discount_amount") @db.Decimal(10, 2)
+  admissionPayableAmount Decimal? @map("admission_payable_amount") @db.Decimal(10, 2)
+  discountType String? @map("discount_type") @db.VarChar(20)
+  discountScope String? @map("discount_scope") @db.VarChar(30)
+  discountValue Decimal? @map("discount_value") @db.Decimal(12, 2)
+  discountSource String? @map("discount_source") @db.VarChar(20)
+  discountReason String? @map("discount_reason") @db.VarChar(255)
+  referenceUserId String? @map("reference_user_id") @db.Uuid
+  referenceName String? @map("reference_name") @db.VarChar(255)
+  referenceMobile String? @map("reference_mobile") @db.VarChar(20)
+  paymentStatus String @default("paid") @map("payment_status") @db.VarChar(20)
+  customData Json? @map("custom_data")
+  notes String? @db.Text
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  createdBy String? @map("created_by") @db.Uuid
+  updatedBy String? @map("updated_by") @db.Uuid
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz
+  deletedBy String? @map("deleted_by") @db.Uuid
+
+  @@unique([studentIdNo])
+  @@index([status])
+  @@index([classId])
+  @@index([sectionId])
+  @@index([currentSessionId])
+  @@index([globalPersonId])
+  @@index([presentDivisionId])
+  @@index([presentDistrictId])
+  @@index([presentUpazilaId])
+  @@index([deletedAt])
+  @@map("students")
+  @@schema("tenant")
+}
 
 model Teacher {
   id String @id @default(dbgenerated("uuidv7()")) @db.Uuid

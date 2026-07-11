@@ -44,6 +44,12 @@ export class ShiftsController {
     return this.shiftsService.findActiveList();
   }
 
+  @Get('options')
+  @RequirePermissions(PERMISSIONS.SHIFTS.VIEW, PERMISSIONS.SHIFTS.ALL)
+  findOptions() {
+    return this.shiftsService.findOptions();
+  }
+
   @Get(':id')
   @RequirePermissions(PERMISSIONS.SHIFTS.VIEW, PERMISSIONS.SHIFTS.ALL)
   findOne(@Param('id') id: string) {

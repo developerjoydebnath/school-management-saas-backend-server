@@ -52,6 +52,17 @@ export class TenantMiddleware implements NestMiddleware {
       }
     }
 
+    // Public admission portal pages may be hosted outside the tenant subdomain
+    // during embedding/testing. Accept an explicit tenant hint only for that
+    // unauthenticated public admission route; protected APIs still use JWT first.
+    if (tenantSchema === 'public' && req.path.includes('/public/admission/')) {
+      const tenantHint = req.headers['x-tenant-slug'] || req.headers['x-tenant-schema'];
+      const rawTenant = Array.isArray(tenantHint) ? tenantHint[0] : tenantHint;
+      if (rawTenant) {
+        tenantSchema = toSchemaName(rawTenant);
+      }
+    }
+
     // ── Priority 2: Host header subdomain ────────────────────────────────────
     // When the frontend and backend share the same domain/port (e.g. proxied),
     // the Host header already contains the subdomain.

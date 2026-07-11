@@ -1,38 +1,33 @@
-import {
+import { InventoryAuditLogsService } from './audit-logs/inventory-audit-logs.service';
+import { Inject, forwardRef,
   BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Role } from '@prisma/client';
+import { Prisma, Role } from '@prisma/client';
 import {
   PrismaService,
   TenantConnectionService,
 } from 'src/cores/prisma.service';
 import {
-  CreateInventoryAssetDto,
   CreateInventoryCategoryDto,
-  CreateInventoryItemDto,
   CreateInventoryLocationDto,
-  CreateInventoryMaintenanceDto,
   CreateInventoryMovementDto,
   CreateInventoryStockBatchDto,
   InventoryMovementTypeDto,
-  UpdateInventoryAssetDto,
   UpdateInventoryCategoryDto,
-  UpdateInventoryItemDto,
   UpdateInventoryLocationDto,
-  UpdateInventoryMaintenanceDto,
   UpdateInventoryStockBatchDto,
 } from './dto/inventory.dto';
-import { InventorySeedService } from './inventory-seed.service';
 
 @Injectable()
 export class InventoryService {
   constructor(
+    @Inject(forwardRef(() => InventoryAuditLogsService))
+    private readonly auditLogsService: InventoryAuditLogsService,
     private readonly tenantConnection: TenantConnectionService,
     private readonly prismaService: PrismaService,
-    private readonly inventorySeedService: InventorySeedService,
   ) {}
 
   private prisma(): any {
@@ -51,6 +46,7 @@ export class InventoryService {
     total: number,
     page: number,
     limit: number,
+    summary?: Record<string, any>,
   ) {
     const totalPages = Math.ceil(total / limit);
     return {
@@ -66,6 +62,7 @@ export class InventoryService {
           totalPages,
           hasNextPage: page < totalPages,
           hasPreviousPage: page > 1,
+          ...(summary ? { summary } : {}),
         },
       },
       meta: null,
@@ -231,6 +228,149 @@ export class InventoryService {
     };
   }
 
+  private addDays(days: number) {
+    const date = new Date();
+    date.setDate(date.getDate() + days);
+    return date;
+  }
+
+  private toNumber(value: any) {
+    if (value === null || value === undefined) return 0;
+    return Number(value);
+  }
+
+  private startOfDay(date: Date) {
+    const next = new Date(date);
+    next.setHours(0, 0, 0, 0);
+    return next;
+  }
+
+  private endOfDay(date: Date) {
+    const next = new Date(date);
+    next.setHours(23, 59, 59, 999);
+    return next;
+  }
+
+  private addMonths(date: Date, months: number) {
+    const next = new Date(date);
+    next.setMonth(next.getMonth() + months);
+    return next;
+  }
+
+  private formatTrendLabel(date: Date, unit: 'day' | 'month') {
+    return date.toLocaleDateString('en-US', {
+      month: 'short',
+      ...(unit === 'day' ? { day: 'numeric' } : { year: '2-digit' }),
+    });
+  }
+
+  private getTrendRange(query: any) {
+    const period = query?.chartPeriod || 'monthly';
+    const today = this.startOfDay(new Date());
+    if (period === 'weekly') {
+      return {
+        period,
+        unit: 'day' as const,
+        start: this.addDays(-6),
+        end: this.endOfDay(today),
+      };
+    }
+    if (period === 'yearly') {
+      return {
+        period,
+        unit: 'month' as const,
+        start: this.addMonths(today, -11),
+        end: this.endOfDay(today),
+      };
+    }
+    if (period === 'custom' && (query?.chartFrom || query?.chartTo)) {
+      const customStart = this.parseDate(query.chartFrom);
+      const customEnd = this.parseDate(query.chartTo);
+      const start = query.chartFrom
+        ? this.startOfDay(customStart as Date)
+        : this.addDays(-29);
+      const end = query.chartTo
+        ? this.endOfDay(customEnd as Date)
+        : this.endOfDay(today);
+      const daySpan = Math.max(
+        Math.ceil((end.getTime() - start.getTime()) / 86_400_000),
+        1,
+      );
+      return {
+        period,
+        unit: daySpan > 62 ? ('month' as const) : ('day' as const),
+        start,
+        end,
+      };
+    }
+    return {
+      period: 'monthly',
+      unit: 'day' as const,
+      start: this.addDays(-29),
+      end: this.endOfDay(today),
+    };
+  }
+
+  private buildTrendBuckets(start: Date, end: Date, unit: 'day' | 'month') {
+    const buckets: { key: string; label: string; count: number }[] = [];
+    const cursor = this.startOfDay(start);
+    if (unit === 'month') cursor.setDate(1);
+    while (cursor <= end) {
+      const key =
+        unit === 'month'
+          ? `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`
+          : cursor.toISOString().slice(0, 10);
+      buckets.push({ key, label: this.formatTrendLabel(cursor, unit), count: 0 });
+      if (unit === 'month') cursor.setMonth(cursor.getMonth() + 1);
+      else cursor.setDate(cursor.getDate() + 1);
+    }
+    return buckets;
+  }
+
+  private trendKey(date: Date, unit: 'day' | 'month') {
+    return unit === 'month'
+      ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+      : date.toISOString().slice(0, 10);
+  }
+
+  private async buildTrend(
+    delegate: any,
+    where: any,
+    dateField: string,
+    query: any,
+  ) {
+    const range = this.getTrendRange(query);
+    const existingDateFilter = where?.[dateField] || {};
+    const trendWhere = {
+      ...where,
+      [dateField]: {
+        ...existingDateFilter,
+        gte:
+          existingDateFilter.gte && existingDateFilter.gte > range.start
+            ? existingDateFilter.gte
+            : range.start,
+        lte:
+          existingDateFilter.lte && existingDateFilter.lte < range.end
+            ? existingDateFilter.lte
+            : range.end,
+      },
+    };
+    const rows = await delegate.findMany({
+      where: trendWhere,
+      select: { [dateField]: true },
+    });
+    const buckets = this.buildTrendBuckets(range.start, range.end, range.unit);
+    const bucketMap = new Map(buckets.map((bucket) => [bucket.key, bucket]));
+    rows.forEach((row: any) => {
+      const rawDate = row?.[dateField];
+      if (!rawDate) return;
+      const key = this.trendKey(new Date(rawDate), range.unit);
+      const bucket = bucketMap.get(key);
+      if (bucket) bucket.count += 1;
+    });
+    return buckets;
+  }
+
   private async logAction(data: {
     action: string;
     entityType: string;
@@ -257,52 +397,38 @@ export class InventoryService {
     }
   }
 
-  async seedCurrentTenant() {
-    await this.inventorySeedService.seedTenantSchema(
-      this.tenantConnection.getTenantSchema(),
-    );
-    return {
-      success: true,
-      statusCode: 200,
-      message: 'Inventory seed completed successfully',
-      data: null,
-      meta: null,
-    };
-  }
+  private async attachChangedByNames(items: any[]) {
+    const userIds = [
+      ...new Set(items.map((item) => item.createdBy).filter(Boolean)),
+    ];
+    if (userIds.length === 0) {
+      return items.map((item) => ({ ...item, changedByName: null }));
+    }
 
-  async overview() {
-    const prisma = this.prisma();
-    const [
-      categoryCount,
-      itemCount,
-      assetCount,
-      damagedBatchCount,
-      maintenanceCount,
-    ] = await Promise.all([
-      prisma.inventoryCategory.count({ where: { deletedAt: null } }),
-      prisma.inventoryItem.count({ where: { deletedAt: null } }),
-      prisma.inventoryAsset.count({ where: { deletedAt: null } }),
-      prisma.inventoryStockBatch.count({
-        where: { deletedAt: null, quantityDamaged: { gt: 0 } },
-      }),
-      prisma.inventoryMaintenance.count({
-        where: { deletedAt: null, status: { in: ['OPEN', 'IN_PROGRESS'] } },
-      }),
-    ]);
-
-    return {
-      success: true,
-      statusCode: 200,
-      message: 'Inventory overview retrieved successfully',
-      data: {
-        categoryCount,
-        itemCount,
-        assetCount,
-        damagedBatchCount,
-        maintenanceCount,
+    const users = await this.prismaService.client.user.findMany({
+      where: { id: { in: userIds } },
+      select: {
+        id: true,
+        email: true,
+        phone: true,
+        profile: {
+          select: {
+            firstName: true,
+            lastName: true,
+          },
+        },
       },
-      meta: null,
-    };
+    });
+    const userMap = new Map(
+      users.map((user) => [user.id, this.getUserDisplayName(user)]),
+    );
+
+    return items.map((item) => ({
+      ...item,
+      changedByName: item.createdBy
+        ? userMap.get(item.createdBy) || item.createdBy
+        : null,
+    }));
   }
 
   async createCategory(dto: CreateInventoryCategoryDto, userId?: string) {
@@ -352,7 +478,7 @@ export class InventoryService {
     if (query.isActive !== undefined)
       where.isActive = query.isActive === 'true';
 
-    const [items, total] = await Promise.all([
+    const [items, total, active, system] = await Promise.all([
       prisma.inventoryCategory.findMany({
         where,
         skip,
@@ -371,13 +497,29 @@ export class InventoryService {
         orderBy: [{ sortOrder: 'asc' }, { createdAt: 'desc' }, { id: 'desc' }],
       }),
       prisma.inventoryCategory.count({ where }),
+      prisma.inventoryCategory.count({ where: { ...where, isActive: true } }),
+      prisma.inventoryCategory.count({ where: { ...where, isSystem: true } }),
     ]);
+    const trend = await this.buildTrend(
+      prisma.inventoryCategory,
+      where,
+      'createdAt',
+      query,
+    );
     return this.paginatedResponse(
       'Inventory categories retrieved successfully',
       items,
       total,
       page,
       limit,
+      {
+        total,
+        active,
+        inactive: total - active,
+        system,
+        custom: total - system,
+        trend,
+      },
     );
   }
 
@@ -453,136 +595,6 @@ export class InventoryService {
     return deleted;
   }
 
-  private itemData(
-    dto: CreateInventoryItemDto | UpdateInventoryItemDto,
-    userId?: string,
-  ) {
-    return {
-      ...(dto.categoryId !== undefined ? { categoryId: dto.categoryId } : {}),
-      ...(dto.name !== undefined ? { name: dto.name } : {}),
-      ...(dto.nameBn !== undefined
-        ? { nameBn: this.nullable(dto.nameBn) }
-        : {}),
-      ...(dto.code !== undefined ? { code: this.nullable(dto.code) } : {}),
-      ...(dto.brand !== undefined ? { brand: this.nullable(dto.brand) } : {}),
-      ...(dto.model !== undefined ? { model: this.nullable(dto.model) } : {}),
-      ...(dto.description !== undefined
-        ? { description: this.nullable(dto.description) }
-        : {}),
-      ...(dto.trackingType !== undefined
-        ? { trackingType: dto.trackingType }
-        : {}),
-      ...(dto.unit !== undefined ? { unit: dto.unit || 'piece' } : {}),
-      ...(dto.material !== undefined
-        ? { material: this.nullable(dto.material) }
-        : {}),
-      ...(dto.length !== undefined ? { length: dto.length } : {}),
-      ...(dto.width !== undefined ? { width: dto.width } : {}),
-      ...(dto.height !== undefined ? { height: dto.height } : {}),
-      ...(dto.depth !== undefined ? { depth: dto.depth } : {}),
-      ...(dto.dimensionUnit !== undefined
-        ? { dimensionUnit: this.nullable(dto.dimensionUnit) }
-        : {}),
-      ...(dto.weight !== undefined ? { weight: dto.weight } : {}),
-      ...(dto.weightUnit !== undefined
-        ? { weightUnit: this.nullable(dto.weightUnit) }
-        : {}),
-      ...(dto.seatingCapacity !== undefined
-        ? { seatingCapacity: dto.seatingCapacity }
-        : {}),
-      ...(dto.isSeatingItem !== undefined
-        ? { isSeatingItem: dto.isSeatingItem }
-        : {}),
-      ...(dto.isDepreciable !== undefined
-        ? { isDepreciable: dto.isDepreciable }
-        : {}),
-      ...(dto.depreciationRate !== undefined
-        ? { depreciationRate: dto.depreciationRate }
-        : {}),
-      ...(dto.usefulLifeYears !== undefined
-        ? { usefulLifeYears: dto.usefulLifeYears }
-        : {}),
-      ...(dto.minimumStock !== undefined
-        ? { minimumStock: dto.minimumStock }
-        : {}),
-      ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
-      ...(userId ? { updatedBy: userId } : {}),
-    };
-  }
-
-  async createItem(dto: CreateInventoryItemDto, userId?: string) {
-    await this.findCategory(dto.categoryId);
-    if (dto.code) {
-      const existing = await this.prisma().inventoryItem.findFirst({
-        where: { code: dto.code, deletedAt: null },
-        select: { id: true },
-      });
-      if (existing)
-        throw new ConflictException('Inventory item code already exists');
-    }
-    const item = await this.prisma().inventoryItem.create({
-      data: { ...this.itemData(dto), createdBy: userId },
-    });
-    await this.logAction({
-      action: 'CREATE',
-      entityType: 'ITEM',
-      entityId: item.id,
-      summary: `Item "${item.name}" created`,
-      afterData: item,
-      userId,
-    });
-    return item;
-  }
-
-  async findItems(query: any = {}) {
-    const prisma = this.prisma();
-    const { page, limit, skip } = this.pagination(query);
-    const where: any = { deletedAt: null };
-    if (query.search) {
-      where.OR = [
-        { name: { contains: query.search, mode: 'insensitive' } },
-        { code: { contains: query.search, mode: 'insensitive' } },
-        { brand: { contains: query.search, mode: 'insensitive' } },
-      ];
-    }
-    if (query.categoryId) where.categoryId = query.categoryId;
-    if (query.trackingType)
-      where.trackingType = { in: String(query.trackingType).split(',') };
-    if (query.isSeatingItem !== undefined)
-      where.isSeatingItem = query.isSeatingItem === 'true';
-    if (query.isActive !== undefined)
-      where.isActive = query.isActive === 'true';
-
-    const [items, total] = await Promise.all([
-      prisma.inventoryItem.findMany({
-        where,
-        skip,
-        take: limit,
-        select: {
-          id: true,
-          name: true,
-          code: true,
-          trackingType: true,
-          unit: true,
-          seatingCapacity: true,
-          isSeatingItem: true,
-          isActive: true,
-          createdAt: true,
-          category: { select: { id: true, name: true } },
-        },
-        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      }),
-      prisma.inventoryItem.count({ where }),
-    ]);
-    return this.paginatedResponse(
-      'Inventory items retrieved successfully',
-      items,
-      total,
-      page,
-      limit,
-    );
-  }
-
   async findItem(id: string) {
     const item = await this.prisma().inventoryItem.findFirst({
       where: { id, deletedAt: null },
@@ -597,839 +609,16 @@ export class InventoryService {
     return item;
   }
 
-  async updateItem(id: string, dto: UpdateInventoryItemDto, userId?: string) {
-    await this.findItem(id);
-    if (dto.categoryId) await this.findCategory(dto.categoryId);
-    const item = await this.prisma().inventoryItem.update({
-      where: { id },
-      data: this.itemData(dto, userId),
-    });
-    await this.logAction({
-      action: 'UPDATE',
-      entityType: 'ITEM',
-      entityId: item.id,
-      summary: `Item "${item.name}" updated`,
-      afterData: item,
-      userId,
-    });
-    return item;
-  }
-
-  async deleteItem(id: string, userId?: string) {
-    const item = await this.findItem(id);
-    const used =
-      item._count.stockBatches + item._count.assets + item._count.movements;
-    if (used > 0)
-      throw new BadRequestException('Inventory item is already in use');
-    const deleted = await this.prisma().inventoryItem.update({
-      where: { id },
-      data: { deletedAt: new Date(), deletedBy: userId },
-    });
-    await this.logAction({
-      action: 'DELETE',
-      entityType: 'ITEM',
-      entityId: deleted.id,
-      summary: `Item "${deleted.name}" deleted`,
-      beforeData: item,
-      afterData: deleted,
-      userId,
-    });
-    return deleted;
-  }
-
-  async createLocation(dto: CreateInventoryLocationDto, userId?: string) {
-    if (dto.classRoomId) {
-      const classRoom = await this.prisma().classRoom.findFirst({
-        where: { id: dto.classRoomId, deletedAt: null },
-        select: { id: true },
-      });
-      if (!classRoom) throw new NotFoundException('Class room not found');
-    }
-    const location = await this.prisma().inventoryLocation.create({
-      data: {
-        locationType: dto.locationType,
-        name: dto.name,
-        code: this.nullable(dto.code),
-        building: this.nullable(dto.building),
-        floor: this.nullable(dto.floor),
-        roomNo: this.nullable(dto.roomNo),
-        classRoomId: this.nullable(dto.classRoomId),
-        description: this.nullable(dto.description),
-        status: this.normalizeStatus(dto.status),
-        createdBy: userId,
-      },
-    });
-    await this.logAction({
-      action: 'CREATE',
-      entityType: 'LOCATION',
-      entityId: location.id,
-      summary: `Location "${location.name}" created`,
-      afterData: location,
-      userId,
-    });
-    return location;
-  }
-
-  async findLocations(query: any = {}) {
-    const prisma = this.prisma();
-    const { page, limit, skip } = this.pagination(query);
-    const where: any = { deletedAt: null };
-    if (query.search) {
-      where.OR = [
-        { name: { contains: query.search, mode: 'insensitive' } },
-        { code: { contains: query.search, mode: 'insensitive' } },
-        { roomNo: { contains: query.search, mode: 'insensitive' } },
-      ];
-    }
-    if (query.locationType)
-      where.locationType = { in: String(query.locationType).split(',') };
-    if (query.status)
-      where.status = {
-        in: String(query.status)
-          .split(',')
-          .map((s) => s.toUpperCase()),
-      };
-    const [items, total] = await Promise.all([
-      prisma.inventoryLocation.findMany({
-        where,
-        skip,
-        take: limit,
-        select: {
-          id: true,
-          locationType: true,
-          name: true,
-          code: true,
-          building: true,
-          floor: true,
-          roomNo: true,
-          status: true,
-          createdAt: true,
-        },
-        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      }),
-      prisma.inventoryLocation.count({ where }),
-    ]);
-    return this.paginatedResponse(
-      'Inventory locations retrieved successfully',
-      items,
-      total,
-      page,
-      limit,
-    );
-  }
-
   async findLocation(id: string) {
-    const location = await this.prisma().inventoryLocation.findFirst({
-      where: { id, deletedAt: null },
-      include: {
-        classRoom: true,
-        _count: { select: { stockBatches: true, assets: true } },
-      },
+    const location = await this.prisma().inventoryLocation.findUnique({
+      where: { id },
     });
     if (!location) throw new NotFoundException('Inventory location not found');
     return location;
   }
 
-  async updateLocation(
-    id: string,
-    dto: UpdateInventoryLocationDto,
-    userId?: string,
-  ) {
-    await this.findLocation(id);
-    const location = await this.prisma().inventoryLocation.update({
-      where: { id },
-      data: {
-        ...(dto.locationType !== undefined
-          ? { locationType: dto.locationType }
-          : {}),
-        ...(dto.name !== undefined ? { name: dto.name } : {}),
-        ...(dto.code !== undefined ? { code: this.nullable(dto.code) } : {}),
-        ...(dto.building !== undefined
-          ? { building: this.nullable(dto.building) }
-          : {}),
-        ...(dto.floor !== undefined ? { floor: this.nullable(dto.floor) } : {}),
-        ...(dto.roomNo !== undefined
-          ? { roomNo: this.nullable(dto.roomNo) }
-          : {}),
-        ...(dto.classRoomId !== undefined
-          ? { classRoomId: this.nullable(dto.classRoomId) }
-          : {}),
-        ...(dto.description !== undefined
-          ? { description: this.nullable(dto.description) }
-          : {}),
-        ...(dto.status !== undefined
-          ? { status: this.normalizeStatus(dto.status) }
-          : {}),
-        updatedBy: userId,
-      },
-    });
-    await this.logAction({
-      action: 'UPDATE',
-      entityType: 'LOCATION',
-      entityId: location.id,
-      summary: `Location "${location.name}" updated`,
-      afterData: location,
-      userId,
-    });
-    return location;
-  }
 
-  async deleteLocation(id: string, userId?: string) {
-    const location = await this.findLocation(id);
-    if (location._count.stockBatches + location._count.assets > 0) {
-      throw new BadRequestException('Inventory location has stock or assets');
-    }
-    const deleted = await this.prisma().inventoryLocation.update({
-      where: { id },
-      data: { deletedAt: new Date(), deletedBy: userId },
-    });
-    await this.logAction({
-      action: 'DELETE',
-      entityType: 'LOCATION',
-      entityId: deleted.id,
-      summary: `Location "${deleted.name}" deleted`,
-      beforeData: location,
-      afterData: deleted,
-      userId,
-    });
-    return deleted;
-  }
 
-  async createStockBatch(dto: CreateInventoryStockBatchDto, userId?: string) {
-    const quantities = this.validateQuantities(dto);
-    await Promise.all([
-      this.findItem(dto.itemId),
-      this.findLocation(dto.locationId),
-    ]);
-    const purchaseDate = this.parseDate(dto.purchaseDate);
-    const batch = await this.prisma().inventoryStockBatch.create({
-      data: {
-        itemId: dto.itemId,
-        locationId: dto.locationId,
-        quantityTotal: quantities.total,
-        quantityGood: quantities.good,
-        quantityDamaged: quantities.damaged,
-        quantityDisposed: quantities.disposed,
-        purchaseDate,
-        purchasePrice: dto.purchasePrice,
-        totalCost:
-          dto.purchasePrice !== undefined
-            ? dto.purchasePrice * quantities.total
-            : undefined,
-        supplier: this.nullable(dto.supplier),
-        invoiceNo: this.nullable(dto.invoiceNo),
-        hasWarranty: dto.hasWarranty ?? false,
-        warrantyPeriod: dto.warrantyPeriod,
-        warrantyPeriodUnit: this.nullable(dto.warrantyPeriodUnit),
-        warrantyExpires: this.calculateWarrantyExpires(
-          purchaseDate,
-          dto.warrantyPeriod,
-          dto.warrantyPeriodUnit,
-        ),
-        warrantyNotes: this.nullable(dto.warrantyNotes),
-        invoiceImageUrl: this.nullable(dto.invoiceImageUrl),
-        invoicePlaceholder: this.nullable(dto.invoicePlaceholder),
-        notes: this.nullable(dto.notes),
-        createdBy: userId,
-      },
-    });
-    await this.logAction({
-      action: 'PURCHASE',
-      entityType: 'STOCK_BATCH',
-      entityId: batch.id,
-      summary: `Stock batch created with ${batch.quantityTotal} item(s)`,
-      afterData: batch,
-      userId,
-    });
-    return batch;
-  }
-
-  async findStockBatches(query: any = {}) {
-    const prisma = this.prisma();
-    const { page, limit, skip } = this.pagination(query);
-    const where: any = {
-      deletedAt: null,
-      ...this.buildDateFilter(query, 'createdAt'),
-    };
-    if (query.itemId) where.itemId = query.itemId;
-    if (query.locationId) where.locationId = query.locationId;
-    if (query.search) {
-      where.OR = [
-        { supplier: { contains: query.search, mode: 'insensitive' } },
-        { invoiceNo: { contains: query.search, mode: 'insensitive' } },
-        { item: { name: { contains: query.search, mode: 'insensitive' } } },
-      ];
-    }
-    const [items, total] = await Promise.all([
-      prisma.inventoryStockBatch.findMany({
-        where,
-        skip,
-        take: limit,
-        select: {
-          id: true,
-          quantityTotal: true,
-          quantityGood: true,
-          quantityDamaged: true,
-          purchaseDate: true,
-          warrantyExpires: true,
-          invoiceImageUrl: true,
-          invoicePlaceholder: true,
-          createdAt: true,
-          item: { select: { id: true, name: true, code: true, unit: true } },
-          location: { select: { id: true, name: true, locationType: true } },
-        },
-        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      }),
-      prisma.inventoryStockBatch.count({ where }),
-    ]);
-    return this.paginatedResponse(
-      'Inventory stock batches retrieved successfully',
-      items,
-      total,
-      page,
-      limit,
-    );
-  }
-
-  async findStockBatch(id: string) {
-    const batch = await this.prisma().inventoryStockBatch.findFirst({
-      where: { id, deletedAt: null },
-      include: {
-        item: { include: { category: true } },
-        location: true,
-        movements: true,
-      },
-    });
-    if (!batch) throw new NotFoundException('Inventory stock batch not found');
-    return batch;
-  }
-
-  async updateStockBatch(
-    id: string,
-    dto: UpdateInventoryStockBatchDto,
-    userId?: string,
-  ) {
-    const current = await this.findStockBatch(id);
-    const quantities = this.validateQuantities({
-      quantityTotal: dto.quantityTotal ?? current.quantityTotal,
-      quantityGood: dto.quantityGood ?? current.quantityGood,
-      quantityDamaged: dto.quantityDamaged ?? current.quantityDamaged,
-      quantityDisposed: dto.quantityDisposed ?? current.quantityDisposed,
-    });
-    const purchaseDate =
-      dto.purchaseDate !== undefined
-        ? this.parseDate(dto.purchaseDate)
-        : current.purchaseDate;
-    const updated = await this.prisma().inventoryStockBatch.update({
-      where: { id },
-      data: {
-        ...(dto.itemId !== undefined ? { itemId: dto.itemId } : {}),
-        ...(dto.locationId !== undefined ? { locationId: dto.locationId } : {}),
-        quantityTotal: quantities.total,
-        quantityGood: quantities.good,
-        quantityDamaged: quantities.damaged,
-        quantityDisposed: quantities.disposed,
-        ...(dto.purchaseDate !== undefined ? { purchaseDate } : {}),
-        ...(dto.purchasePrice !== undefined
-          ? {
-              purchasePrice: dto.purchasePrice,
-              totalCost: dto.purchasePrice * quantities.total,
-            }
-          : {}),
-        ...(dto.supplier !== undefined
-          ? { supplier: this.nullable(dto.supplier) }
-          : {}),
-        ...(dto.invoiceNo !== undefined
-          ? { invoiceNo: this.nullable(dto.invoiceNo) }
-          : {}),
-        ...(dto.hasWarranty !== undefined
-          ? { hasWarranty: dto.hasWarranty }
-          : {}),
-        ...(dto.warrantyPeriod !== undefined
-          ? { warrantyPeriod: dto.warrantyPeriod }
-          : {}),
-        ...(dto.warrantyPeriodUnit !== undefined
-          ? { warrantyPeriodUnit: this.nullable(dto.warrantyPeriodUnit) }
-          : {}),
-        warrantyExpires: this.calculateWarrantyExpires(
-          purchaseDate,
-          dto.warrantyPeriod ?? current.warrantyPeriod,
-          dto.warrantyPeriodUnit ?? current.warrantyPeriodUnit,
-        ),
-        ...(dto.warrantyNotes !== undefined
-          ? { warrantyNotes: this.nullable(dto.warrantyNotes) }
-          : {}),
-        ...(dto.invoiceImageUrl !== undefined
-          ? { invoiceImageUrl: this.nullable(dto.invoiceImageUrl) }
-          : {}),
-        ...(dto.invoicePlaceholder !== undefined
-          ? { invoicePlaceholder: this.nullable(dto.invoicePlaceholder) }
-          : {}),
-        ...(dto.notes !== undefined ? { notes: this.nullable(dto.notes) } : {}),
-        updatedBy: userId,
-      },
-    });
-    await this.logAction({
-      action: 'UPDATE',
-      entityType: 'STOCK_BATCH',
-      entityId: updated.id,
-      summary: `Stock batch updated`,
-      beforeData: current,
-      afterData: updated,
-      userId,
-    });
-    return updated;
-  }
-
-  async deleteStockBatch(id: string, userId?: string) {
-    const current = await this.findStockBatch(id);
-    const deleted = await this.prisma().inventoryStockBatch.update({
-      where: { id },
-      data: { deletedAt: new Date(), deletedBy: userId },
-    });
-    await this.logAction({
-      action: 'DELETE',
-      entityType: 'STOCK_BATCH',
-      entityId: deleted.id,
-      summary: `Stock batch deleted`,
-      beforeData: current,
-      afterData: deleted,
-      userId,
-    });
-    return deleted;
-  }
-
-  async createAsset(
-    dto: CreateInventoryAssetDto,
-    userId?: string,
-    userContext?: { role?: Role; schema?: string },
-  ) {
-    const assignedUser = dto.assignedTo
-      ? await this.findAssignableUser(
-          dto.assignedTo,
-          userContext?.role,
-          userContext?.schema,
-        )
-      : null;
-
-    if (dto.assignedTo && !assignedUser) {
-      throw new NotFoundException('Assigned user not found');
-    }
-
-    await Promise.all([
-      this.findItem(dto.itemId),
-      this.findLocation(dto.locationId),
-    ]);
-    const purchaseDate = this.parseDate(dto.purchaseDate);
-    const asset = await this.prisma().inventoryAsset.create({
-      data: {
-        itemId: dto.itemId,
-        locationId: dto.locationId,
-        assetTag: dto.assetTag,
-        serialNo: this.nullable(dto.serialNo),
-        macAddress: this.nullable(dto.macAddress),
-        condition: dto.condition || 'GOOD',
-        status: dto.status || 'IN_STORE',
-        assignedTo: this.nullable(dto.assignedTo),
-        assignedName: assignedUser
-          ? this.getUserDisplayName(assignedUser)
-          : null,
-        assignedAt: dto.assignedTo ? new Date() : null,
-        purchaseDate,
-        purchasePrice: dto.purchasePrice,
-        supplier: this.nullable(dto.supplier),
-        invoiceNo: this.nullable(dto.invoiceNo),
-        hasWarranty: dto.hasWarranty ?? false,
-        warrantyPeriod: dto.warrantyPeriod,
-        warrantyPeriodUnit: this.nullable(dto.warrantyPeriodUnit),
-        warrantyExpires: this.calculateWarrantyExpires(
-          purchaseDate,
-          dto.warrantyPeriod,
-          dto.warrantyPeriodUnit,
-        ),
-        notes: this.nullable(dto.notes),
-        createdBy: userId,
-      },
-    });
-    await this.logAction({
-      action: 'CREATE',
-      entityType: 'ASSET',
-      entityId: asset.id,
-      summary: `Asset "${asset.assetTag}" created`,
-      afterData: asset,
-      userId,
-    });
-    return asset;
-  }
-
-  async findAssets(query: any = {}) {
-    const prisma = this.prisma();
-    const { page, limit, skip } = this.pagination(query);
-    const where: any = {
-      deletedAt: null,
-      ...this.buildDateFilter(query, 'createdAt'),
-    };
-    if (query.itemId) where.itemId = query.itemId;
-    if (query.locationId) where.locationId = query.locationId;
-    if (query.status) where.status = { in: String(query.status).split(',') };
-    if (query.condition)
-      where.condition = { in: String(query.condition).split(',') };
-    if (query.search) {
-      where.OR = [
-        { assetTag: { contains: query.search, mode: 'insensitive' } },
-        { serialNo: { contains: query.search, mode: 'insensitive' } },
-        { item: { name: { contains: query.search, mode: 'insensitive' } } },
-      ];
-    }
-    const [items, total] = await Promise.all([
-      prisma.inventoryAsset.findMany({
-        where,
-        skip,
-        take: limit,
-        select: {
-          id: true,
-          assetTag: true,
-          serialNo: true,
-          condition: true,
-          status: true,
-          assignedTo: true,
-          assignedName: true,
-          warrantyExpires: true,
-          createdAt: true,
-          item: { select: { id: true, name: true, code: true } },
-          location: { select: { id: true, name: true, locationType: true } },
-          assignedToUser: {
-            select: {
-              id: true,
-              email: true,
-              phone: true,
-              schemaName: true,
-              profile: {
-                select: {
-                  firstName: true,
-                  lastName: true,
-                },
-              },
-            },
-          },
-        },
-        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      }),
-      prisma.inventoryAsset.count({ where }),
-    ]);
-    return this.paginatedResponse(
-      'Inventory assets retrieved successfully',
-      items,
-      total,
-      page,
-      limit,
-    );
-  }
-
-  async findAsset(id: string) {
-    const asset = await this.prisma().inventoryAsset.findFirst({
-      where: { id, deletedAt: null },
-      include: {
-        item: { include: { category: true } },
-        location: true,
-        assignedToUser: {
-          select: {
-            id: true,
-            email: true,
-            phone: true,
-            schemaName: true,
-            profile: {
-              select: {
-                firstName: true,
-                lastName: true,
-              },
-            },
-          },
-        },
-        movements: true,
-        maintenances: true,
-      },
-    });
-    if (!asset) throw new NotFoundException('Inventory asset not found');
-    return asset;
-  }
-
-  async updateAsset(
-    id: string,
-    dto: UpdateInventoryAssetDto,
-    userId?: string,
-    userContext?: { role?: Role; schema?: string },
-  ) {
-    const current = await this.findAsset(id);
-    const purchaseDate =
-      dto.purchaseDate !== undefined
-        ? this.parseDate(dto.purchaseDate)
-        : current.purchaseDate;
-    const assignedUser =
-      dto.assignedTo !== undefined && dto.assignedTo !== null
-        ? await this.findAssignableUser(
-            dto.assignedTo,
-            userContext?.role,
-            userContext?.schema,
-          )
-        : null;
-
-    if (dto.assignedTo && !assignedUser) {
-      throw new NotFoundException('Assigned user not found');
-    }
-
-    const asset = await this.prisma().inventoryAsset.update({
-      where: { id },
-      data: {
-        ...(dto.itemId !== undefined ? { itemId: dto.itemId } : {}),
-        ...(dto.locationId !== undefined ? { locationId: dto.locationId } : {}),
-        ...(dto.assetTag !== undefined ? { assetTag: dto.assetTag } : {}),
-        ...(dto.serialNo !== undefined
-          ? { serialNo: this.nullable(dto.serialNo) }
-          : {}),
-        ...(dto.macAddress !== undefined
-          ? { macAddress: this.nullable(dto.macAddress) }
-          : {}),
-        ...(dto.condition !== undefined ? { condition: dto.condition } : {}),
-        ...(dto.status !== undefined ? { status: dto.status } : {}),
-        ...(dto.assignedTo !== undefined
-          ? {
-              assignedTo: this.nullable(dto.assignedTo),
-              assignedName: assignedUser
-                ? this.getUserDisplayName(assignedUser)
-                : null,
-              assignedAt: dto.assignedTo ? new Date() : null,
-            }
-          : {}),
-        ...(dto.purchaseDate !== undefined ? { purchaseDate } : {}),
-        ...(dto.purchasePrice !== undefined
-          ? { purchasePrice: dto.purchasePrice }
-          : {}),
-        ...(dto.supplier !== undefined
-          ? { supplier: this.nullable(dto.supplier) }
-          : {}),
-        ...(dto.invoiceNo !== undefined
-          ? { invoiceNo: this.nullable(dto.invoiceNo) }
-          : {}),
-        ...(dto.hasWarranty !== undefined
-          ? { hasWarranty: dto.hasWarranty }
-          : {}),
-        ...(dto.warrantyPeriod !== undefined
-          ? { warrantyPeriod: dto.warrantyPeriod }
-          : {}),
-        ...(dto.warrantyPeriodUnit !== undefined
-          ? { warrantyPeriodUnit: this.nullable(dto.warrantyPeriodUnit) }
-          : {}),
-        warrantyExpires: this.calculateWarrantyExpires(
-          purchaseDate,
-          dto.warrantyPeriod ?? current.warrantyPeriod,
-          dto.warrantyPeriodUnit ?? current.warrantyPeriodUnit,
-        ),
-        ...(dto.notes !== undefined ? { notes: this.nullable(dto.notes) } : {}),
-        updatedBy: userId,
-      },
-    });
-    await this.logAction({
-      action: 'UPDATE',
-      entityType: 'ASSET',
-      entityId: asset.id,
-      summary: `Asset "${asset.assetTag}" updated`,
-      beforeData: current,
-      afterData: asset,
-      userId,
-    });
-    return asset;
-  }
-
-  async deleteAsset(id: string, userId?: string) {
-    const current = await this.findAsset(id);
-    const deleted = await this.prisma().inventoryAsset.update({
-      where: { id },
-      data: { deletedAt: new Date(), deletedBy: userId },
-    });
-    await this.logAction({
-      action: 'DELETE',
-      entityType: 'ASSET',
-      entityId: deleted.id,
-      summary: `Asset "${deleted.assetTag}" deleted`,
-      beforeData: current,
-      afterData: deleted,
-      userId,
-    });
-    return deleted;
-  }
-
-  async createMovement(dto: CreateInventoryMovementDto, userId?: string) {
-    const prisma = this.prisma();
-    let movement: any;
-    if (
-      dto.movementType === InventoryMovementTypeDto.TRANSFER &&
-      dto.stockBatchId
-    ) {
-      movement = await prisma.$transaction(async (tx: any) => {
-        const batch = await tx.inventoryStockBatch.findFirst({
-          where: { id: dto.stockBatchId, deletedAt: null },
-        });
-        if (!batch)
-          throw new NotFoundException('Inventory stock batch not found');
-        if (!dto.toLocationId)
-          throw new BadRequestException('Destination location is required');
-        if (batch.quantityGood < dto.quantity) {
-          throw new BadRequestException(
-            'Transfer quantity exceeds available good quantity',
-          );
-        }
-        await tx.inventoryStockBatch.update({
-          where: { id: batch.id },
-          data: {
-            quantityTotal: batch.quantityTotal - dto.quantity,
-            quantityGood: batch.quantityGood - dto.quantity,
-          },
-        });
-        await tx.inventoryStockBatch.create({
-          data: {
-            itemId: batch.itemId,
-            locationId: dto.toLocationId,
-            quantityTotal: dto.quantity,
-            quantityGood: dto.quantity,
-            purchaseDate: batch.purchaseDate,
-            purchasePrice: batch.purchasePrice,
-            totalCost: batch.purchasePrice
-              ? Number(batch.purchasePrice) * dto.quantity
-              : null,
-            supplier: batch.supplier,
-            invoiceNo: batch.invoiceNo,
-            hasWarranty: batch.hasWarranty,
-            warrantyPeriod: batch.warrantyPeriod,
-            warrantyPeriodUnit: batch.warrantyPeriodUnit,
-            warrantyExpires: batch.warrantyExpires,
-            warrantyNotes: batch.warrantyNotes,
-            createdBy: userId,
-          },
-        });
-        return tx.inventoryMovement.create({
-          data: {
-            itemId: batch.itemId,
-            stockBatchId: batch.id,
-            fromLocationId: batch.locationId,
-            toLocationId: dto.toLocationId,
-            movementType: dto.movementType,
-            quantity: dto.quantity,
-            referenceNo: this.nullable(dto.referenceNo),
-            notes: this.nullable(dto.notes),
-            createdBy: userId,
-          },
-        });
-      });
-    } else if (
-      dto.movementType === InventoryMovementTypeDto.TRANSFER &&
-      dto.assetId &&
-      dto.toLocationId
-    ) {
-      movement = await prisma.$transaction(async (tx: any) => {
-        const asset = await tx.inventoryAsset.findFirst({
-          where: { id: dto.assetId, deletedAt: null },
-        });
-        if (!asset) throw new NotFoundException('Inventory asset not found');
-        await tx.inventoryAsset.update({
-          where: { id: asset.id },
-          data: {
-            locationId: dto.toLocationId,
-            status: 'IN_USE',
-            updatedBy: userId,
-          },
-        });
-        return tx.inventoryMovement.create({
-          data: {
-            itemId: asset.itemId,
-            assetId: asset.id,
-            fromLocationId: asset.locationId,
-            toLocationId: dto.toLocationId,
-            movementType: dto.movementType,
-            quantity: 1,
-            referenceNo: this.nullable(dto.referenceNo),
-            notes: this.nullable(dto.notes),
-            createdBy: userId,
-          },
-        });
-      });
-    } else {
-      movement = await prisma.inventoryMovement.create({
-        data: {
-          itemId: dto.itemId,
-          assetId: this.nullable(dto.assetId),
-          stockBatchId: this.nullable(dto.stockBatchId),
-          fromLocationId: this.nullable(dto.fromLocationId),
-          toLocationId: this.nullable(dto.toLocationId),
-          movementType: dto.movementType,
-          quantity: dto.quantity,
-          referenceNo: this.nullable(dto.referenceNo),
-          notes: this.nullable(dto.notes),
-          createdBy: userId,
-        },
-      });
-    }
-
-    await this.logAction({
-      action: dto.movementType,
-      entityType: 'MOVEMENT',
-      entityId: movement.id,
-      summary: `${dto.movementType} movement recorded for ${movement.quantity} item(s)`,
-      afterData: movement,
-      userId,
-    });
-    return movement;
-  }
-
-  async findMovements(query: any = {}) {
-    const prisma = this.prisma();
-    const { page, limit, skip } = this.pagination(query);
-    const where: any = { ...this.buildDateFilter(query, 'createdAt') };
-    if (query.itemId) where.itemId = query.itemId;
-    if (query.movementType)
-      where.movementType = { in: String(query.movementType).split(',') };
-    const [items, total] = await Promise.all([
-      prisma.inventoryMovement.findMany({
-        where,
-        skip,
-        take: limit,
-        select: {
-          id: true,
-          movementType: true,
-          quantity: true,
-          referenceNo: true,
-          createdAt: true,
-          item: { select: { id: true, name: true, code: true } },
-          fromLocation: { select: { id: true, name: true } },
-          toLocation: { select: { id: true, name: true } },
-        },
-        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      }),
-      prisma.inventoryMovement.count({ where }),
-    ]);
-    return this.paginatedResponse(
-      'Inventory movements retrieved successfully',
-      items,
-      total,
-      page,
-      limit,
-    );
-  }
-
-  async findMovement(id: string) {
-    const movement = await this.prisma().inventoryMovement.findFirst({
-      where: { id },
-      include: {
-        item: true,
-        asset: true,
-        stockBatch: true,
-        fromLocation: true,
-        toLocation: true,
-      },
-    });
-    if (!movement) throw new NotFoundException('Inventory movement not found');
-    return movement;
-  }
 
   async findAuditLogs(query: any = {}) {
     const prisma = this.prisma();
@@ -1445,7 +634,7 @@ export class InventoryService {
         { entityType: { contains: query.search, mode: 'insensitive' } },
       ];
     }
-    const [items, total] = await Promise.all([
+    const [items, total, byAction] = await Promise.all([
       prisma.inventoryAuditLog.findMany({
         where,
         skip,
@@ -1462,160 +651,43 @@ export class InventoryService {
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       }),
       prisma.inventoryAuditLog.count({ where }),
+      prisma.inventoryAuditLog.groupBy({
+        by: ['action'],
+        where,
+        _count: { _all: true },
+      }),
     ]);
+    const actionSummary = Object.fromEntries(
+      (byAction as any[]).map((item: any) => [item.action, item._count._all]),
+    );
+    const trend = await this.buildTrend(
+      prisma.inventoryAuditLog,
+      where,
+      'createdAt',
+      query,
+    );
     return this.paginatedResponse(
       'Inventory audit logs retrieved successfully',
-      items,
+      await this.attachChangedByNames(items),
       total,
       page,
       limit,
+      {
+        total,
+        created: actionSummary.CREATE || 0,
+        updated: actionSummary.UPDATE || 0,
+        deleted: actionSummary.DELETE || 0,
+        other: Math.max(
+          total -
+            (actionSummary.CREATE || 0) -
+            (actionSummary.UPDATE || 0) -
+            (actionSummary.DELETE || 0),
+          0,
+        ),
+        trend,
+      },
     );
   }
 
-  async createMaintenance(dto: CreateInventoryMaintenanceDto, userId?: string) {
-    await this.findItem(dto.itemId);
-    const maintenance = await this.prisma().inventoryMaintenance.create({
-      data: {
-        itemId: dto.itemId,
-        assetId: this.nullable(dto.assetId),
-        stockBatchId: this.nullable(dto.stockBatchId),
-        locationId: this.nullable(dto.locationId),
-        issueTitle: dto.issueTitle,
-        issueDescription: this.nullable(dto.issueDescription),
-        status: dto.status || 'OPEN',
-        priority: dto.priority || 'MEDIUM',
-        serviceProvider: this.nullable(dto.serviceProvider),
-        cost: dto.cost,
-        notes: this.nullable(dto.notes),
-        createdBy: userId,
-      },
-    });
-    await this.logAction({
-      action: 'CREATE',
-      entityType: 'MAINTENANCE',
-      entityId: maintenance.id,
-      summary: `Maintenance "${maintenance.issueTitle}" created`,
-      afterData: maintenance,
-      userId,
-    });
-    return maintenance;
-  }
-
-  async findMaintenances(query: any = {}) {
-    const prisma = this.prisma();
-    const { page, limit, skip } = this.pagination(query);
-    const where: any = {
-      deletedAt: null,
-      ...this.buildDateFilter(query, 'reportedAt'),
-    };
-    if (query.status) where.status = { in: String(query.status).split(',') };
-    if (query.priority)
-      where.priority = { in: String(query.priority).split(',') };
-    if (query.itemId) where.itemId = query.itemId;
-    const [items, total] = await Promise.all([
-      prisma.inventoryMaintenance.findMany({
-        where,
-        skip,
-        take: limit,
-        select: {
-          id: true,
-          issueTitle: true,
-          status: true,
-          priority: true,
-          cost: true,
-          reportedAt: true,
-          resolvedAt: true,
-          item: { select: { id: true, name: true, code: true } },
-          location: { select: { id: true, name: true } },
-        },
-        orderBy: [{ reportedAt: 'desc' }, { id: 'desc' }],
-      }),
-      prisma.inventoryMaintenance.count({ where }),
-    ]);
-    return this.paginatedResponse(
-      'Inventory maintenances retrieved successfully',
-      items,
-      total,
-      page,
-      limit,
-    );
-  }
-
-  async findMaintenance(id: string) {
-    const maintenance = await this.prisma().inventoryMaintenance.findFirst({
-      where: { id, deletedAt: null },
-      include: { item: true, asset: true, stockBatch: true, location: true },
-    });
-    if (!maintenance)
-      throw new NotFoundException('Inventory maintenance not found');
-    return maintenance;
-  }
-
-  async updateMaintenance(
-    id: string,
-    dto: UpdateInventoryMaintenanceDto,
-    userId?: string,
-  ) {
-    const current = await this.findMaintenance(id);
-    const maintenance = await this.prisma().inventoryMaintenance.update({
-      where: { id },
-      data: {
-        ...(dto.itemId !== undefined ? { itemId: dto.itemId } : {}),
-        ...(dto.assetId !== undefined
-          ? { assetId: this.nullable(dto.assetId) }
-          : {}),
-        ...(dto.stockBatchId !== undefined
-          ? { stockBatchId: this.nullable(dto.stockBatchId) }
-          : {}),
-        ...(dto.locationId !== undefined
-          ? { locationId: this.nullable(dto.locationId) }
-          : {}),
-        ...(dto.issueTitle !== undefined ? { issueTitle: dto.issueTitle } : {}),
-        ...(dto.issueDescription !== undefined
-          ? { issueDescription: this.nullable(dto.issueDescription) }
-          : {}),
-        ...(dto.status !== undefined
-          ? {
-              status: dto.status,
-              resolvedAt: dto.status === 'RESOLVED' ? new Date() : null,
-            }
-          : {}),
-        ...(dto.priority !== undefined ? { priority: dto.priority } : {}),
-        ...(dto.serviceProvider !== undefined
-          ? { serviceProvider: this.nullable(dto.serviceProvider) }
-          : {}),
-        ...(dto.cost !== undefined ? { cost: dto.cost } : {}),
-        ...(dto.notes !== undefined ? { notes: this.nullable(dto.notes) } : {}),
-        updatedBy: userId,
-      },
-    });
-    await this.logAction({
-      action: 'UPDATE',
-      entityType: 'MAINTENANCE',
-      entityId: maintenance.id,
-      summary: `Maintenance "${maintenance.issueTitle}" updated`,
-      beforeData: current,
-      afterData: maintenance,
-      userId,
-    });
-    return maintenance;
-  }
-
-  async deleteMaintenance(id: string, userId?: string) {
-    const current = await this.findMaintenance(id);
-    const deleted = await this.prisma().inventoryMaintenance.update({
-      where: { id },
-      data: { deletedAt: new Date(), deletedBy: userId },
-    });
-    await this.logAction({
-      action: 'DELETE',
-      entityType: 'MAINTENANCE',
-      entityId: deleted.id,
-      summary: `Maintenance "${deleted.issueTitle}" deleted`,
-      beforeData: current,
-      afterData: deleted,
-      userId,
-    });
-    return deleted;
-  }
+  
 }

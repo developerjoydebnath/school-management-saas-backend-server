@@ -1,0 +1,136 @@
+export type AdmissionFeeHeadSeed = {
+  name: string;
+  nameBn?: string;
+  code: string;
+  type: string;
+  amount: number;
+  isSystem: boolean;
+  isShown: boolean;
+  isRequired: boolean;
+  sortOrder: number;
+  description?: string;
+};
+
+export const ADMISSION_FEE_HEADS: AdmissionFeeHeadSeed[] = [
+  {
+    name: 'Admission Fee',
+    nameBn: 'ভর্তি ফি',
+    code: 'admission_fee',
+    type: 'one_time',
+    amount: 1500,
+    isSystem: true,
+    isShown: true,
+    isRequired: true,
+    sortOrder: 10,
+  },
+  {
+    name: 'Session Charge',
+    nameBn: 'সেশন চার্জ',
+    code: 'session_charge',
+    type: 'yearly',
+    amount: 1000,
+    isSystem: true,
+    isShown: true,
+    isRequired: true,
+    sortOrder: 20,
+  },
+  {
+    name: 'Development Fee',
+    nameBn: 'উন্নয়ন ফি',
+    code: 'development_fee',
+    type: 'one_time',
+    amount: 500,
+    isSystem: true,
+    isShown: true,
+    isRequired: false,
+    sortOrder: 30,
+  },
+  {
+    name: 'ID Card Fee',
+    nameBn: 'আইডি কার্ড ফি',
+    code: 'id_card_fee',
+    type: 'one_time',
+    amount: 150,
+    isSystem: true,
+    isShown: true,
+    isRequired: true,
+    sortOrder: 40,
+  },
+  {
+    name: 'Diary / Planner Fee',
+    nameBn: 'ডায়েরি / প্ল্যানার ফি',
+    code: 'diary_fee',
+    type: 'yearly',
+    amount: 200,
+    isSystem: true,
+    isShown: true,
+    isRequired: false,
+    sortOrder: 50,
+  },
+  {
+    name: 'Library Fee',
+    nameBn: 'লাইব্রেরি ফি',
+    code: 'library_fee',
+    type: 'yearly',
+    amount: 300,
+    isSystem: true,
+    isShown: true,
+    isRequired: false,
+    sortOrder: 60,
+  },
+  {
+    name: 'Computer / Lab Fee',
+    nameBn: 'কম্পিউটার / ল্যাব ফি',
+    code: 'lab_fee',
+    type: 'monthly',
+    amount: 300,
+    isSystem: true,
+    isShown: true,
+    isRequired: false,
+    sortOrder: 70,
+  },
+  {
+    name: 'First Month Tuition',
+    nameBn: 'প্রথম মাসের বেতন',
+    code: 'first_month_tuition',
+    type: 'monthly',
+    amount: 1000,
+    isSystem: true,
+    isShown: true,
+    isRequired: false,
+    sortOrder: 80,
+  },
+  {
+    name: 'Exam Fee',
+    nameBn: 'পরীক্ষা ফি',
+    code: 'exam_fee',
+    type: 'yearly',
+    amount: 500,
+    isSystem: true,
+    isShown: false,
+    isRequired: false,
+    sortOrder: 90,
+  },
+  {
+    name: 'Transport Registration Fee',
+    nameBn: 'পরিবহন নিবন্ধন ফি',
+    code: 'transport_registration_fee',
+    type: 'one_time',
+    amount: 0,
+    isSystem: true,
+    isShown: false,
+    isRequired: false,
+    sortOrder: 100,
+  },
+  {
+    name: 'Hostel Registration Fee',
+    nameBn: 'হোস্টেল নিবন্ধন ফি',
+    code: 'hostel_registration_fee',
+    type: 'one_time',
+    amount: 0,
+    isSystem: true,
+    isShown: false,
+    isRequired: false,
+    sortOrder: 110,
+  },
+];

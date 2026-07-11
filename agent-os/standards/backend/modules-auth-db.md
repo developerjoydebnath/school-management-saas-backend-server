@@ -116,6 +116,14 @@ Common failure:
 
 If every endpoint in a newly added module returns `500 Internal Server Error`, first check for stale Prisma Client or missing database tables. This usually means the code was added but `prisma generate` or the schema migration step was skipped.
 
+For tenant-scoped models that use `@@schema("tenant")`, runtime Prisma queries target the literal `tenant` schema. Manual SQL patches must update:
+
+1. `tenant` — the runtime schema used by Prisma tenant models.
+2. `tenant_template` — so newly activated schools inherit the table shape.
+3. Existing school schemas such as `model_high_school` — so already-created tenants keep working.
+
+Do not only patch real school schemas. If `tenant.<table>` is missing, newly added APIs can still return 500 even when the table exists in cloned school schemas.
+
 ```powershell
 # Example checks
 npx.cmd prisma validate

@@ -42,6 +42,29 @@ export class ShiftsService {
     };
   }
 
+  async findOptions() {
+    const prisma = this.tenantConnection.getTenantClient();
+    const items = await prisma.shift.findMany({
+      where: { status: 'ACTIVE', deletedAt: null },
+      select: {
+        id: true,
+        name: true,
+      },
+      orderBy: { startTime: 'asc' },
+    });
+
+    return {
+      success: true,
+      statusCode: 200,
+      message: 'Shift options retrieved successfully',
+      data: items.map((shift) => ({
+        label: shift.name,
+        value: shift.id,
+      })),
+      meta: null,
+    };
+  }
+
   async findAll(
     page: string | number = 1,
     limit: string | number = 10,

@@ -12,7 +12,9 @@ import { ShiftsModule } from './modules/academics/shifts/shifts.module';
 import { SubjectsModule } from './modules/academics/subjects/subjects.module';
 import { SyllabusesModule } from './modules/academics/syllabuses/syllabuses.module';
 import { TimetablesModule } from './modules/academics/timetables/timetables.module';
+import { AdmissionModule } from './modules/admission/admission.module';
 import { ExamsModule } from './modules/examinations/exams/exams.module';
+import { ExamRoutinesModule } from './modules/examinations/routines/exam-routines.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
 import { LocationsModule } from './modules/locations/locations.module';
@@ -27,6 +29,7 @@ import { SubscriptionPlansModule } from './modules/subscription-plans/subscripti
 import { DepartmentsModule } from './modules/staff/departments/departments.module';
 import { DesignationsModule } from './modules/staff/designations/designations.module';
 import { TeachersModule } from './modules/staff/teachers/teachers.module';
+import { StudentsModule } from './modules/students/students.module';
 import { VouchersModule } from './modules/vouchers/vouchers.module';
 
 @Module({
@@ -34,11 +37,14 @@ import { VouchersModule } from './modules/vouchers/vouchers.module';
     ConfigModule.forRoot({ isGlobal: true }),
     AuthModule,
     ApiKeyModule,
+    AdmissionModule,
+    StudentsModule,
     SessionsModule,
     ClassRoomsModule,
     ClassesModule,
     SubjectsModule,
     ExamsModule,
+    ExamRoutinesModule,
     SyllabusesModule,
     TimetablesModule,
     InventoryModule,

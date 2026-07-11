@@ -123,6 +123,10 @@ export const PERMISSIONS = {
     },
   },
   INVENTORY: {
+      AUDIT_LOGS: {
+        ALL: 'inventory.audit_logs.all',
+        VIEW: 'inventory.audit_logs.view',
+      },
     ALL: 'inventory.all',
     VIEW: 'inventory.view',
     CATEGORIES: {
@@ -173,6 +177,37 @@ export const PERMISSIONS = {
       CREATE: 'inventory.maintenance.create',
       EDIT: 'inventory.maintenance.edit',
       DELETE: 'inventory.maintenance.delete',
+    },
+  },
+  ADMISSION: {
+    ALL: 'admission.all',
+    SETTINGS: {
+      ALL: 'admission.settings.all',
+      VIEW: 'admission.settings.view',
+      EDIT: 'admission.settings.update',
+    },
+    APPLICATIONS: {
+      ALL: 'admission.applications.all',
+      VIEW: 'admission.applications.view',
+      CREATE: 'admission.applications.create',
+      EDIT: 'admission.applications.update',
+      DELETE: 'admission.applications.delete',
+      APPROVE: 'admission.applications.approve',
+      REJECT: 'admission.applications.reject',
+    },
+  },
+  STUDENTS: {
+    ALL: 'students.all',
+    DIRECTORY: {
+      ALL: 'students.directory.all',
+      VIEW: 'students.directory.view',
+    },
+    PROFILE: {
+      ALL: 'students.profile.all',
+      VIEW: 'students.profile.view',
+      EDIT: 'students.profile.update',
+      STATUS: 'students.status.update',
+      DELETE: 'students.delete',
     },
   },
   // Add other modules permissions here as needed
