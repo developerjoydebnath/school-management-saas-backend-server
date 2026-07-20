@@ -9,12 +9,15 @@ import {
   IsNumber,
   IsOptional,
   IsString,
-  IsUUID,
+  Matches,
   Max,
   MaxLength,
   Min,
   ValidateNested,
 } from 'class-validator';
+
+const UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export enum SyllabusStatusEnum {
   DRAFT = 'DRAFT',
@@ -103,11 +106,11 @@ export class SyllabusChapterDto {
 }
 
 export class SyllabusSubjectDto {
-  @IsUUID('4')
+  @Matches(UUID_REGEX, { message: 'subjectId must be a UUID' })
   subjectId: string;
 
   @Transform(({ value }) => (typeof value === 'string' && value.trim() === '' ? undefined : value))
-  @IsUUID('4')
+  @Matches(UUID_REGEX, { message: 'teacherId must be a UUID' })
   @IsOptional()
   teacherId?: string;
 
@@ -119,18 +122,21 @@ export class SyllabusSubjectDto {
 }
 
 export class CreateSyllabusDto {
-  @IsUUID('4')
+  @Matches(UUID_REGEX, { message: 'sessionId must be a UUID' })
   sessionId: string;
 
-  @IsUUID('4')
+  @Matches(UUID_REGEX, { message: 'examId must be a UUID' })
   examId: string;
 
-  @IsUUID('4')
+  @Matches(UUID_REGEX, { message: 'classId must be a UUID' })
   classId: string;
 
   @IsArray()
   @ArrayUnique()
-  @IsUUID('4', { each: true })
+  @Matches(UUID_REGEX, {
+    each: true,
+    message: 'each value in sectionIds must be a UUID',
+  })
   @IsOptional()
   sectionIds?: string[];
 

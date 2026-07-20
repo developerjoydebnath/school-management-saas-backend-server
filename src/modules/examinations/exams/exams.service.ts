@@ -72,11 +72,6 @@ export class ExamsService {
               id: true,
               enName: true,
               bnName: true,
-              sections: {
-                where: { deletedAt: null },
-                select: { id: true, name: true },
-                orderBy: { name: 'asc' as const },
-              },
             },
           },
         },

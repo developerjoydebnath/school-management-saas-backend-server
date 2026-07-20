@@ -4,21 +4,28 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { TenantConnectionService } from 'src/cores/prisma.service';
-import { CreateClassDto, SectionDto, UpdateClassDto } from './dto/class.dto';
+import {
+  PrismaService,
+  TenantConnectionService,
+} from 'src/cores/prisma.service';
+import { CreateClassDto, UpdateClassDto } from './dto/class.dto';
 
 @Injectable()
 export class ClassesService {
-  constructor(private tenantConnection: TenantConnectionService) {}
+  constructor(
+    private tenantConnection: TenantConnectionService,
+    private prisma: PrismaService,
+  ) {}
 
-  private getInclude() {
+  private getInclude(sessionId?: string | null) {
     return {
-      classRoom: true,
-      shift: true,
-      sections: {
-        where: { deletedAt: null },
-        include: { classRoom: true, shift: true },
-        orderBy: { name: 'asc' as const },
+      sessionSections: {
+        where: {
+          deletedAt: null,
+          ...(sessionId ? { sessionId } : {}),
+        },
+        include: { section: true, room: true, shift: true },
+        orderBy: { createdAt: 'asc' as const },
       },
     };
   }
@@ -29,43 +36,17 @@ export class ClassesService {
       enName: true,
       bnName: true,
       status: true,
-      classRoomId: true,
-      shiftId: true,
-      classRoom: {
-        select: {
-          id: true,
-          roomNo: true,
-          capacity: true,
-        },
-      },
-      shift: {
-        select: {
-          id: true,
-          name: true,
-        },
-      },
-      sections: {
+      sessionSections: {
         where: { deletedAt: null },
         select: {
           id: true,
-          name: true,
-          classRoomId: true,
-          shiftId: true,
-          classRoom: {
-            select: {
-              id: true,
-              roomNo: true,
-              capacity: true,
-            },
-          },
-          shift: {
-            select: {
-              id: true,
-              name: true,
-            },
-          },
+          sectionId: true,
+          capacity: true,
+          section: { select: { id: true, name: true, bnName: true } },
+          room: { select: { id: true, roomNo: true, capacity: true } },
+          shift: { select: { id: true, name: true } },
         },
-        orderBy: { name: 'asc' as const },
+        orderBy: { createdAt: 'asc' as const },
       },
     };
   }
@@ -76,101 +57,135 @@ export class ClassesService {
       enName: true,
       bnName: true,
       status: true,
-      sections: {
-        where: { deletedAt: null, status: 'ACTIVE' },
-        select: {
-          id: true,
-          name: true,
-          classRoomId: true,
-          shiftId: true,
-        },
-        orderBy: { name: 'asc' as const },
-      },
     };
+  }
+
+  private getSchemaName() {
+    const schema = this.tenantConnection.getTenantSchema();
+    if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(schema)) {
+      throw new BadRequestException('Invalid tenant schema');
+    }
+    return schema;
+  }
+
+  private quoteIdent(value: string) {
+    return `"${value.replace(/"/g, '""')}"`;
+  }
+
+  private async hasTable(tableName: string) {
+    const prisma = this.tenantConnection.getTenantClient() as any;
+    const [result] = (await prisma.$queryRawUnsafe(
+      `
+        SELECT EXISTS (
+          SELECT 1
+          FROM information_schema.tables
+          WHERE table_schema = $1
+            AND table_name = $2
+        ) AS exists
+      `,
+      this.getSchemaName(),
+      tableName,
+    )) as Array<{ exists: boolean }>;
+
+    return Boolean(result?.exists);
+  }
+
+  private async getFallbackSessionId() {
+    const selectedSessionId = this.tenantConnection.getAcademicSessionId?.();
+    if (selectedSessionId) return selectedSessionId;
+
+    const session = await this.prisma.academicSession.findFirst({
+      where: { status: 'ACTIVE' },
+      select: { id: true },
+      orderBy: { year: 'desc' },
+    });
+
+    return session?.id || null;
+  }
+
+  private async resolveSessionId(sessionId?: string) {
+    if (sessionId) return sessionId;
+    return this.getFallbackSessionId();
+  }
+
+  private normalizeClassWithSections(cls: any, sections: any[]) {
+    return {
+      ...cls,
+      sections: sections
+        .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')))
+        .map((section) => ({
+          id: section.id,
+          name: section.name,
+          classRoomId: section.classRoomId,
+          shiftId: section.shiftId,
+        })),
+    };
+  }
+
+  private async applySessionSections(classes: any[], sessionId?: string | null) {
+    if (!sessionId || classes.length === 0) return classes;
+    const hasSessionClassSections = await this.hasTable(
+      'session_class_sections',
+    );
+    const hasSections = await this.hasTable('sections');
+    if (!hasSessionClassSections || !hasSections) return classes;
+
+    const prisma = this.tenantConnection.getTenantClient() as any;
+    const schema = this.quoteIdent(this.getSchemaName());
+    const classIds = classes.map((item) => item.id).filter(Boolean);
+    const mappings = (await prisma.$queryRawUnsafe(
+      `
+        SELECT
+          scs.class_id::text AS "classId",
+          scs.section_id::text AS "sectionId",
+          s.name AS "sectionName",
+          scs.room_id::text AS "classRoomId",
+          scs.shift_id::text AS "shiftId"
+        FROM ${schema}.session_class_sections scs
+        LEFT JOIN ${schema}.sections s ON s.id = scs.section_id
+        WHERE scs.session_id = $1::uuid
+          AND scs.class_id = ANY($2::uuid[])
+          AND scs.deleted_at IS NULL
+          AND scs.status = 'ACTIVE'
+        ORDER BY scs.class_id ASC, COALESCE(s.sort_order, 0) ASC, s.name ASC
+      `,
+      sessionId,
+      classIds,
+    )) as Array<{
+      classId: string;
+      sectionId: string | null;
+      sectionName: string | null;
+      classRoomId: string | null;
+      shiftId: string | null;
+    }>;
+
+    if (!mappings.length) return classes;
+
+    const mappingsByClass = new Map<string, any[]>();
+    for (const mapping of mappings) {
+      const current = mappingsByClass.get(mapping.classId) || [];
+      current.push(mapping);
+      mappingsByClass.set(mapping.classId, current);
+    }
+
+    return classes.map((cls) => {
+      const classMappings = mappingsByClass.get(cls.id);
+      if (!classMappings) return cls;
+      const mappedSections = classMappings
+        .filter((mapping) => mapping.sectionId)
+        .map((mapping) => ({
+          id: mapping.sectionId,
+          name: mapping.sectionName,
+          classRoomId: mapping.classRoomId,
+          shiftId: mapping.shiftId,
+        }))
+        .filter(Boolean);
+      return this.normalizeClassWithSections(cls, mappedSections);
+    });
   }
 
   private normalizeStatus(status?: string) {
     return status?.toUpperCase() === 'INACTIVE' ? 'INACTIVE' : 'ACTIVE';
-  }
-
-  private hasSections(sections?: SectionDto[]) {
-    return Array.isArray(sections) && sections.length > 0;
-  }
-
-  private async assertShiftExists(shiftId?: string) {
-    if (!shiftId) return;
-    const prisma = this.tenantConnection.getTenantClient();
-    const shift = await prisma.shift.findFirst({
-      where: { id: shiftId, deletedAt: null },
-      select: { id: true },
-    });
-    if (!shift) {
-      throw new BadRequestException('Shift not found');
-    }
-  }
-
-  private async assertClassRoomExists(classRoomId?: string) {
-    if (!classRoomId) return;
-    const prisma = this.tenantConnection.getTenantClient();
-    const room = await prisma.classRoom.findFirst({
-      where: { id: classRoomId, deletedAt: null },
-      select: { id: true },
-    });
-    if (!room) {
-      throw new BadRequestException('Class room not found');
-    }
-  }
-
-  private async assertSectionReferencesExist(sections?: SectionDto[]) {
-    if (!this.hasSections(sections)) return;
-    const uniqueShiftIds = [
-      ...new Set(sections!.map((section) => section.shiftId)),
-    ];
-    const uniqueRoomIds = [
-      ...new Set(sections!.map((section) => section.classRoomId)),
-    ];
-    const prisma = this.tenantConnection.getTenantClient();
-    const [shifts, rooms] = await Promise.all([
-      prisma.shift.findMany({
-        where: { id: { in: uniqueShiftIds }, deletedAt: null },
-        select: { id: true },
-      }),
-      prisma.classRoom.findMany({
-        where: { id: { in: uniqueRoomIds }, deletedAt: null },
-        select: { id: true },
-      }),
-    ]);
-    if (shifts.length !== uniqueShiftIds.length) {
-      throw new BadRequestException(
-        'One or more section shifts were not found',
-      );
-    }
-    if (rooms.length !== uniqueRoomIds.length) {
-      throw new BadRequestException(
-        'One or more section class rooms were not found',
-      );
-    }
-  }
-
-  private validateClassDefaults(dto: CreateClassDto | UpdateClassDto) {
-    if (this.hasSections(dto.sections)) return;
-    if (!dto.classRoomId || !dto.shiftId) {
-      throw new BadRequestException(
-        'Class room and shift are required when no sections are provided',
-      );
-    }
-  }
-
-  private validateSectionNames(sections?: SectionDto[]) {
-    if (!this.hasSections(sections)) return;
-    const normalizedNames = sections!.map((section) =>
-      section.name.trim().toLowerCase(),
-    );
-    if (new Set(normalizedNames).size !== normalizedNames.length) {
-      throw new BadRequestException(
-        'Section names must be unique within a class',
-      );
-    }
   }
 
   private async assertUniqueName(enName: string, currentId?: string) {
@@ -190,46 +205,15 @@ export class ClassesService {
     }
   }
 
-  private mapSectionCreate(section: SectionDto) {
-    return {
-      name: section.name,
-      classRoomId: section.classRoomId,
-      shiftId: section.shiftId,
-    };
-  }
-
   async create(createClassDto: CreateClassDto) {
     const prisma = this.tenantConnection.getTenantClient();
-    this.validateClassDefaults(createClassDto);
-    this.validateSectionNames(createClassDto.sections);
     await this.assertUniqueName(createClassDto.enName);
 
-    if (this.hasSections(createClassDto.sections)) {
-      await this.assertSectionReferencesExist(createClassDto.sections);
-    } else {
-      await Promise.all([
-        this.assertShiftExists(createClassDto.shiftId),
-        this.assertClassRoomExists(createClassDto.classRoomId),
-      ]);
-    }
-
-    const hasSections = this.hasSections(createClassDto.sections);
     const created = await prisma.class.create({
       data: {
         enName: createClassDto.enName,
         bnName: createClassDto.bnName || null,
-        classRoomId: hasSections ? null : createClassDto.classRoomId,
-        shiftId: hasSections ? null : createClassDto.shiftId,
         status: this.normalizeStatus(createClassDto.status),
-        ...(hasSections
-          ? {
-              sections: {
-                create: createClassDto.sections!.map((section) =>
-                  this.mapSectionCreate(section),
-                ),
-              },
-            }
-          : {}),
       },
       include: this.getInclude(),
     });
@@ -243,19 +227,98 @@ export class ClassesService {
     };
   }
 
-  async findActiveList() {
+  async findActiveList(query: any = {}) {
     const prisma = this.tenantConnection.getTenantClient();
+    const sessionId = await this.resolveSessionId(query.sessionId);
     const items = await prisma.class.findMany({
       where: { status: 'ACTIVE', deletedAt: null },
-      select: this.getActiveListSelect(),
+      select: {
+        id: true,
+        enName: true,
+        bnName: true,
+        status: true,
+      },
       orderBy: { enName: 'asc' },
     });
+    const data = await this.applySessionSections(items, sessionId);
 
     return {
       success: true,
       statusCode: 200,
       message: 'Active classes retrieved successfully',
-      data: items,
+      data,
+      meta: null,
+    };
+  }
+
+  async findActiveSections(query: any = {}) {
+    const prisma = this.tenantConnection.getTenantClient() as any;
+    const classId = query.classId;
+    if (!classId) {
+      throw new BadRequestException('Class is required');
+    }
+
+    const sessionId = await this.resolveSessionId(query.sessionId);
+
+    const mappings =
+      sessionId
+        ? await prisma.sessionClassSection.findMany({
+            where: {
+              sessionId,
+              classId,
+              deletedAt: null,
+            },
+            select: {
+              id: true,
+              sectionId: true,
+              roomId: true,
+              shiftId: true,
+              status: true,
+              section: {
+                select: {
+                  id: true,
+                  name: true,
+                  bnName: true,
+                  sortOrder: true,
+                  status: true,
+                  deletedAt: true,
+                },
+              },
+            },
+            orderBy: [{ createdAt: 'asc' }],
+          })
+        : [];
+
+    const data = mappings
+      .filter((mapping: any) => mapping.sectionId && mapping.section)
+      .filter(
+        (mapping: any) =>
+          !mapping.section.deletedAt &&
+          String(mapping.status || 'ACTIVE').toUpperCase() === 'ACTIVE' &&
+          String(mapping.section.status || 'ACTIVE').toUpperCase() === 'ACTIVE',
+      )
+      .sort(
+        (a: any, b: any) =>
+          Number(a.section.sortOrder || 0) - Number(b.section.sortOrder || 0) ||
+          String(a.section.name || '').localeCompare(
+            String(b.section.name || ''),
+          ),
+      )
+      .map((mapping: any) => ({
+        id: mapping.section.id,
+        label: mapping.section.name,
+        value: mapping.section.id,
+        name: mapping.section.name,
+        bnName: mapping.section.bnName,
+        classRoomId: mapping.roomId,
+        shiftId: mapping.shiftId,
+      }));
+
+    return {
+      success: true,
+      statusCode: 200,
+      message: 'Active sections retrieved successfully',
+      data,
       meta: null,
     };
   }
@@ -282,36 +345,6 @@ export class ClassesService {
           .map((status) => status.trim().toUpperCase())
           .filter(Boolean),
       };
-    }
-    if (query.shiftId) {
-      const shiftIds = String(query.shiftId)
-        .split(',')
-        .map((shiftId) => shiftId.trim())
-        .filter(Boolean);
-      andFilters.push({
-        OR: [
-          { shiftId: { in: shiftIds } },
-          {
-            sections: { some: { shiftId: { in: shiftIds }, deletedAt: null } },
-          },
-        ],
-      });
-    }
-    if (query.classRoomId) {
-      const classRoomIds = String(query.classRoomId)
-        .split(',')
-        .map((classRoomId) => classRoomId.trim())
-        .filter(Boolean);
-      andFilters.push({
-        OR: [
-          { classRoomId: { in: classRoomIds } },
-          {
-            sections: {
-              some: { classRoomId: { in: classRoomIds }, deletedAt: null },
-            },
-          },
-        ],
-      });
     }
     if (andFilters.length) {
       where.AND = andFilters;
@@ -349,11 +382,12 @@ export class ClassesService {
     };
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, query: any = {}) {
     const prisma = this.tenantConnection.getTenantClient();
+    const sessionId = await this.resolveSessionId(query.sessionId);
     const cls = await prisma.class.findFirst({
       where: { id, deletedAt: null },
-      include: this.getInclude(),
+      include: this.getInclude(sessionId),
     });
     if (!cls) {
       throw new NotFoundException('Class not found');
@@ -363,89 +397,25 @@ export class ClassesService {
 
   async update(id: string, updateClassDto: UpdateClassDto) {
     const prisma = this.tenantConnection.getTenantClient();
-    const existingClass = await this.findOne(id);
-    if (
-      updateClassDto.sections !== undefined ||
-      updateClassDto.classRoomId !== undefined ||
-      updateClassDto.shiftId !== undefined
-    ) {
-      this.validateClassDefaults({
-        ...updateClassDto,
-        classRoomId:
-          updateClassDto.classRoomId ?? existingClass.classRoomId ?? undefined,
-        shiftId: updateClassDto.shiftId ?? existingClass.shiftId ?? undefined,
-      });
-    }
-    this.validateSectionNames(updateClassDto.sections);
+    await this.findOne(id);
 
     if (updateClassDto.enName) {
       await this.assertUniqueName(updateClassDto.enName, id);
     }
-    if (this.hasSections(updateClassDto.sections)) {
-      await this.assertSectionReferencesExist(updateClassDto.sections);
-    } else {
-      await Promise.all([
-        updateClassDto.shiftId
-          ? this.assertShiftExists(updateClassDto.shiftId)
-          : Promise.resolve(),
-        updateClassDto.classRoomId
-          ? this.assertClassRoomExists(updateClassDto.classRoomId)
-          : Promise.resolve(),
-      ]);
-    }
-
-    const hasSections = this.hasSections(updateClassDto.sections);
-    const updated = await prisma.$transaction(async (tx) => {
-      if (updateClassDto.sections !== undefined) {
-        await tx.section.updateMany({
-          where: { classId: id, deletedAt: null },
-          data: {
-            deletedAt: new Date(),
-            status: 'INACTIVE',
-          },
-        });
-      }
-
-      return tx.class.update({
-        where: { id },
-        data: {
-          ...(updateClassDto.enName !== undefined
-            ? { enName: updateClassDto.enName }
-            : {}),
-          ...(updateClassDto.bnName !== undefined
-            ? { bnName: updateClassDto.bnName || null }
-            : {}),
-          ...(updateClassDto.status !== undefined
-            ? { status: this.normalizeStatus(updateClassDto.status) }
-            : {}),
-          ...(updateClassDto.sections !== undefined ||
-          updateClassDto.classRoomId !== undefined
-            ? {
-                classRoomId: hasSections
-                  ? null
-                  : (updateClassDto.classRoomId ?? existingClass.classRoomId),
-              }
-            : {}),
-          ...(updateClassDto.sections !== undefined ||
-          updateClassDto.shiftId !== undefined
-            ? {
-                shiftId: hasSections
-                  ? null
-                  : (updateClassDto.shiftId ?? existingClass.shiftId),
-              }
-            : {}),
-          ...(hasSections
-            ? {
-                sections: {
-                  create: updateClassDto.sections!.map((section) =>
-                    this.mapSectionCreate(section),
-                  ),
-                },
-              }
-            : {}),
-        },
-        include: this.getInclude(),
-      });
+    const updated = await prisma.class.update({
+      where: { id },
+      data: {
+        ...(updateClassDto.enName !== undefined
+          ? { enName: updateClassDto.enName }
+          : {}),
+        ...(updateClassDto.bnName !== undefined
+          ? { bnName: updateClassDto.bnName || null }
+          : {}),
+        ...(updateClassDto.status !== undefined
+          ? { status: this.normalizeStatus(updateClassDto.status) }
+          : {}),
+      },
+      include: this.getInclude(),
     });
 
     return {
@@ -466,7 +436,7 @@ export class ClassesService {
       data: {
         deletedAt: new Date(),
         status: 'INACTIVE',
-        sections: {
+        sessionSections: {
           updateMany: {
             where: { deletedAt: null },
             data: {

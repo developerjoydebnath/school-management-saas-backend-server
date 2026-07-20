@@ -4,6 +4,7 @@ import {
   IsArray,
   IsBoolean,
   IsDateString,
+  IsEmail,
   IsInt,
   IsNotEmpty,
   IsObject,
@@ -36,6 +37,15 @@ export class CreateAdmissionApplicationDto {
   @MaxLength(255)
   @IsOptional()
   studentNameBn?: string;
+
+  @IsEmail()
+  @MaxLength(255)
+  @IsOptional()
+  email?: string;
+
+  @Allow()
+  @IsOptional()
+  studentEmail?: string;
 
   @IsDateString()
   @IsOptional()
@@ -165,6 +175,15 @@ export class CreateAdmissionApplicationDto {
   @Allow()
   @IsOptional()
   paidAt?: string;
+
+  @Allow()
+  @IsOptional()
+  autoApprove?: boolean;
+
+  @IsString()
+  @MaxLength(20)
+  @IsOptional()
+  rollNumber?: string;
 
   [key: string]: any;
 }

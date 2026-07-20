@@ -7,9 +7,10 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  Matches,
   MaxLength,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 
 export class CreateSchoolRequestDto {
   @ApiProperty({ example: 'Dhaka Model High School' })
@@ -17,6 +18,22 @@ export class CreateSchoolRequestDto {
   @IsNotEmpty()
   @MaxLength(255)
   schoolName: string;
+
+  @ApiPropertyOptional({
+    example: 'DMHS',
+    description:
+      'Optional requested short code. If omitted, the platform generates one.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(10)
+  @Matches(/^[A-Z0-9]{2,10}$/i, {
+    message: 'schoolShortCode must be 2-10 letters or numbers',
+  })
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.trim().toUpperCase() : value,
+  )
+  schoolShortCode?: string;
 
   @ApiProperty({
     enum: ['school', 'madrasa', 'college', 'university_college'],

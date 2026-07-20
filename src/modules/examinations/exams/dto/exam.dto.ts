@@ -8,11 +8,14 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
-  IsUUID,
+  Matches,
   MaxLength,
   Min,
 } from 'class-validator';
 import { SubjectMarkDivisionEnum } from '../../../academics/subjects/dto/subject.dto';
+
+const UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export enum ExamTypeEnum {
   UNIT_TEST = 'UNIT_TEST',
@@ -45,7 +48,7 @@ export enum ExamSubjectStatusEnum {
 }
 
 export class CreateExamDto {
-  @IsUUID('4')
+  @Matches(UUID_REGEX, { message: 'sessionId must be a UUID' })
   sessionId: string;
 
   @IsString()
@@ -74,7 +77,10 @@ export class CreateExamDto {
 
   @IsArray()
   @ArrayUnique()
-  @IsUUID('4', { each: true })
+  @Matches(UUID_REGEX, {
+    each: true,
+    message: 'each value in classIds must be a UUID',
+  })
   classIds: string[];
 
   @IsString()
@@ -108,7 +114,7 @@ export class CreateExamDto {
 }
 
 export class UpdateExamDto {
-  @IsUUID('4')
+  @Matches(UUID_REGEX, { message: 'sessionId must be a UUID' })
   @IsOptional()
   sessionId?: string;
 
@@ -140,7 +146,10 @@ export class UpdateExamDto {
 
   @IsArray()
   @ArrayUnique()
-  @IsUUID('4', { each: true })
+  @Matches(UUID_REGEX, {
+    each: true,
+    message: 'each value in classIds must be a UUID',
+  })
   @IsOptional()
   classIds?: string[];
 
@@ -190,11 +199,11 @@ export class UpdateExamSubjectDto {
   @IsOptional()
   durationMins?: number;
 
-  @IsUUID('4')
+  @Matches(UUID_REGEX, { message: 'classRoomId must be a UUID' })
   @IsOptional()
   classRoomId?: string;
 
-  @IsUUID('4')
+  @Matches(UUID_REGEX, { message: 'invigilatorId must be a UUID' })
   @IsOptional()
   invigilatorId?: string;
 

@@ -5,7 +5,6 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
-  IsUUID,
   MaxLength,
   ValidateNested,
 } from 'class-validator';
@@ -15,12 +14,6 @@ export class SectionDto {
   @IsNotEmpty()
   @MaxLength(100)
   name: string;
-
-  @IsUUID()
-  classRoomId: string;
-
-  @IsUUID()
-  shiftId: string;
 }
 
 export class CreateClassDto {
@@ -33,14 +26,6 @@ export class CreateClassDto {
   @IsOptional()
   @MaxLength(255)
   bnName?: string;
-
-  @IsUUID()
-  @IsOptional()
-  classRoomId?: string;
-
-  @IsUUID()
-  @IsOptional()
-  shiftId?: string;
 
   @IsString()
   @IsOptional()
@@ -64,14 +49,6 @@ export class UpdateClassDto {
   @IsOptional()
   @MaxLength(255)
   bnName?: string;
-
-  @IsUUID()
-  @IsOptional()
-  classRoomId?: string;
-
-  @IsUUID()
-  @IsOptional()
-  shiftId?: string;
 
   @IsString()
   @IsOptional()

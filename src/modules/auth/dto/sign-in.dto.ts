@@ -3,9 +3,9 @@ import { IsNotEmpty, IsString } from 'class-validator';
 
 export class SignInDto {
   @ApiProperty({
-    example: 'super_admin@school.com',
+    example: 'STU-2026-001',
     description:
-      'Login identifier — one of: Student ID (STU-YYYY-NNN), phone number (01XXXXXXXXX), or email address',
+      'Login identifier. Students use Student ID only; staff, parents, and admins may use phone or email.',
   })
   @IsString()
   @IsNotEmpty()

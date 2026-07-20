@@ -83,6 +83,17 @@ export class TimetablesService {
     ];
   }
 
+  private parseList(value?: string) {
+    return [
+      ...new Set(
+        (value || '')
+          .split(',')
+          .map((id) => id.trim())
+          .filter(Boolean),
+      ),
+    ];
+  }
+
   private parsePage(value?: string) {
     const page = Number(value || 1);
     return Number.isFinite(page) && page > 0 ? page : 1;
@@ -119,6 +130,32 @@ export class TimetablesService {
     });
 
     return new Map(sessions.map((session) => [session.id, session.name]));
+  }
+
+  private async getFallbackSessionId() {
+    const selectedSessionId = this.tenantConnection.getAcademicSessionId();
+    if (selectedSessionId) return selectedSessionId;
+
+    const activeSession = await this.prisma.client.academicSession.findFirst({
+      where: { status: 'ACTIVE' },
+      select: { id: true },
+      orderBy: { year: 'desc' },
+    });
+
+    return activeSession?.id || null;
+  }
+
+  private async resolveSingleSessionId(sessionId?: string) {
+    if (sessionId) return sessionId;
+    return this.getFallbackSessionId();
+  }
+
+  private async resolveHistorySessionIds(sessionId?: string) {
+    const explicitSessionIds = this.parseList(sessionId);
+    if (explicitSessionIds.length) return explicitSessionIds;
+
+    const fallbackSessionId = await this.getFallbackSessionId();
+    return fallbackSessionId ? [fallbackSessionId] : [];
   }
 
   private extractAssignmentIds(cells: Record<string, unknown>) {
@@ -161,14 +198,15 @@ export class TimetablesService {
           select: { id: true },
         }),
         sectionIds.length
-          ? tenant.section.findMany({
+          ? tenant.sessionClassSection.findMany({
               where: {
-                id: { in: sectionIds },
+                sessionId: dto.sessionId,
                 classId: dto.classId,
+                sectionId: { in: sectionIds },
                 deletedAt: null,
                 status: 'ACTIVE',
               },
-              select: { id: true },
+              select: { sectionId: true },
             })
           : Promise.resolve([]),
         subjectIds.length
@@ -205,7 +243,10 @@ export class TimetablesService {
 
     if (!session) throw new BadRequestException('Academic session not found');
     if (!cls) throw new BadRequestException('Class not found');
-    if (sections.length !== sectionIds.length) {
+    const availableSectionIds = new Set(
+      sections.map((section: any) => section.sectionId).filter(Boolean),
+    );
+    if (availableSectionIds.size !== sectionIds.length) {
       throw new BadRequestException(
         'One or more selected sections were not found',
       );
@@ -232,14 +273,16 @@ export class TimetablesService {
     classId?: string;
     sectionId?: string;
   }) {
-    if (!query.sessionId || !query.classId) {
+    const sessionId = await this.resolveSingleSessionId(query.sessionId);
+
+    if (!sessionId || !query.classId) {
       throw new BadRequestException('Session and class are required');
     }
 
     const prisma = this.tenantConnection.getTenantClient();
     const timetable = await prisma.timetable.findFirst({
       where: {
-        sessionId: query.sessionId,
+        sessionId,
         classId: query.classId,
         sectionId: query.sectionId || null,
         deletedAt: null,
@@ -369,9 +412,11 @@ export class TimetablesService {
     const skip = (page - 1) * limit;
     const savedFrom = this.parseDateStart(query.savedFrom);
     const savedTo = this.parseDateEnd(query.savedTo);
+    const sessionIds = await this.resolveHistorySessionIds(query.sessionId);
 
     const where: any = {
-      ...(query.sessionId ? { sessionId: query.sessionId } : {}),
+      ...(sessionIds.length === 1 ? { sessionId: sessionIds[0] } : {}),
+      ...(sessionIds.length > 1 ? { sessionId: { in: sessionIds } } : {}),
       ...(query.classId ? { classId: query.classId } : {}),
       ...(query.sectionId
         ? query.sectionId === 'class'
@@ -536,23 +581,62 @@ export class TimetablesService {
       orderBy: { fullName: 'asc' },
     });
 
-    const items = teachers.filter((teacher) => {
-      const specializationSubjects = Array.isArray(
-        teacher.specializationSubjects,
-      )
-        ? teacher.specializationSubjects
+    const getSpecializationSubjectIds = (value: unknown) =>
+      Array.isArray(value)
+        ? value.filter((item): item is string => typeof item === 'string')
         : [];
+
+    const items = teachers.filter((teacher) => {
+      const specializationSubjects = getSpecializationSubjectIds(
+        teacher.specializationSubjects,
+      );
       return (
         teacher.primarySubjectId === subjectId ||
         specializationSubjects.includes(subjectId)
       );
     });
 
+    const specializedSubjectIds = [
+      ...new Set(
+        items
+          .flatMap((teacher) =>
+            getSpecializationSubjectIds(teacher.specializationSubjects),
+          )
+          .filter(Boolean),
+      ),
+    ];
+    const specializedSubjects = specializedSubjectIds.length
+      ? await prisma.subject.findMany({
+          where: {
+            id: { in: specializedSubjectIds },
+            deletedAt: null,
+            status: 'ACTIVE',
+          },
+          select: {
+            id: true,
+            enName: true,
+            bnName: true,
+            code: true,
+          },
+        })
+      : [];
+    const specializedSubjectMap = new Map(
+      specializedSubjects.map((subject) => [subject.id, subject]),
+    );
+    const enrichedItems = items.map((teacher) => ({
+      ...teacher,
+      specializationSubjectItems: getSpecializationSubjectIds(
+        teacher.specializationSubjects,
+      )
+        .map((id) => specializedSubjectMap.get(id))
+        .filter(Boolean),
+    }));
+
     return {
       success: true,
       statusCode: 200,
       message: 'Subject teachers retrieved successfully',
-      data: items,
+      data: enrichedItems,
       meta: null,
     };
   }
@@ -563,7 +647,9 @@ export class TimetablesService {
     sectionIds?: string;
     locale?: string;
   }): Promise<Buffer> {
-    if (!query.sessionId || !query.classId) {
+    const sessionId = await this.resolveSingleSessionId(query.sessionId);
+
+    if (!sessionId || !query.classId) {
       throw new BadRequestException('Session and class are required');
     }
 
@@ -573,7 +659,7 @@ export class TimetablesService {
 
     const [session, cls, selectedSections, school] = await Promise.all([
       this.prisma.client.academicSession.findFirst({
-        where: { id: query.sessionId },
+        where: { id: sessionId },
         select: { id: true, name: true },
       }),
       prisma.class.findFirst({
@@ -581,21 +667,26 @@ export class TimetablesService {
         select: { id: true, enName: true, bnName: true },
       }),
       sectionIds.length
-        ? prisma.section.findMany({
+        ? prisma.sessionClassSection.findMany({
             where: {
-              id: { in: sectionIds },
+              sessionId,
               classId: query.classId,
+              sectionId: { in: sectionIds },
               deletedAt: null,
+              status: 'ACTIVE',
             },
-            select: { id: true, name: true },
+            select: { section: { select: { id: true, name: true } } },
           })
-        : Promise.resolve([] as { id: string; name: string }[]),
+        : Promise.resolve([] as any[]),
       this.getTargetSchoolName(),
     ]);
 
     if (!session) throw new BadRequestException('Academic session not found');
     if (!cls) throw new BadRequestException('Class not found');
-    if (selectedSections.length !== sectionIds.length) {
+    const selectedSectionItems = selectedSections
+      .map((item: any) => item.section)
+      .filter(Boolean);
+    if (selectedSectionItems.length !== sectionIds.length) {
       throw new BadRequestException(
         'One or more selected sections were not found',
       );
@@ -603,7 +694,7 @@ export class TimetablesService {
 
     const timetables = await prisma.timetable.findMany({
       where: {
-        sessionId: query.sessionId,
+        sessionId,
         classId: query.classId,
         deletedAt: null,
         ...(sectionIds.length
@@ -646,7 +737,9 @@ export class TimetablesService {
     }
 
     const sortedSectionNames = sectionIds.map(
-      (id) => selectedSections.find((section) => section.id === id)?.name || '',
+      (id) =>
+        selectedSectionItems.find((section: any) => section.id === id)?.name ||
+        '',
     );
 
     const html = getTimetablePdfTemplate({

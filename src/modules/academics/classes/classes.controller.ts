@@ -35,22 +35,29 @@ export class ClassesController {
     @Query('limit') limit?: string,
     @Query('search') search?: string,
     @Query('status') status?: string,
-    @Query('shiftId') shiftId?: string,
-    @Query('classRoomId') classRoomId?: string,
   ) {
-    return this.classesService.findAll({ page, limit, search, status, shiftId, classRoomId });
+    return this.classesService.findAll({ page, limit, search, status });
   }
 
   @Get('active-list')
   @RequirePermissions(PERMISSIONS.CLASSES.VIEW, PERMISSIONS.CLASSES.ALL)
-  findActiveList() {
-    return this.classesService.findActiveList();
+  findActiveList(@Query('sessionId') sessionId?: string) {
+    return this.classesService.findActiveList({ sessionId });
+  }
+
+  @Get('sections/active-list')
+  @RequirePermissions(PERMISSIONS.CLASSES.VIEW, PERMISSIONS.CLASSES.ALL)
+  findActiveSections(
+    @Query('classId') classId?: string,
+    @Query('sessionId') sessionId?: string,
+  ) {
+    return this.classesService.findActiveSections({ classId, sessionId });
   }
 
   @Get(':id')
   @RequirePermissions(PERMISSIONS.CLASSES.VIEW, PERMISSIONS.CLASSES.ALL)
-  findOne(@Param('id') id: string) {
-    return this.classesService.findOne(id);
+  findOne(@Param('id') id: string, @Query('sessionId') sessionId?: string) {
+    return this.classesService.findOne(id, { sessionId });
   }
 
   @Patch(':id')

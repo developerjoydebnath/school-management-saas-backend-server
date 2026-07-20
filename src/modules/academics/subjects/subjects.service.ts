@@ -19,12 +19,7 @@ export class SubjectsService {
     return {
       classes: {
         include: {
-          class: {
-            include: {
-              classRoom: true,
-              shift: true,
-            },
-          },
+          class: true,
         },
         orderBy: { class: { enName: 'asc' as const } },
       },

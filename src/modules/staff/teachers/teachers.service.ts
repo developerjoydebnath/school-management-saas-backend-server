@@ -1,21 +1,68 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException, BadRequestException, HttpException } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import {
   PrismaService,
   TenantConnectionService,
 } from 'src/cores/prisma.service';
+import { UsernamesService } from 'src/modules/usernames/usernames.service';
 import { CreateTeacherDto, UpdateTeacherDto } from './dto/teacher.dto';
+
+const UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 @Injectable()
 export class TeachersService {
   constructor(
     private tenantConnection: TenantConnectionService,
     private prisma: PrismaService,
+    private readonly usernamesService: UsernamesService,
   ) {}
+
+  private normalizeOptionalUuid(value: any, field: string) {
+    if (value === undefined || value === null) {
+      return null;
+    }
+
+    if (typeof value !== 'string') {
+      throw new BadRequestException(`${field} must be a valid UUID`);
+    }
+
+    const trimmed = value.trim();
+    if (!trimmed || trimmed.toLowerCase() === 'undefined' || trimmed.toLowerCase() === 'null') {
+      return null;
+    }
+
+    if (!UUID_REGEX.test(trimmed)) {
+      throw new BadRequestException(`${field} must be a valid UUID`);
+    }
+
+    return trimmed;
+  }
+
+  private normalizeRequiredUuid(value: any, field: string) {
+    if (typeof value !== 'string') {
+      throw new BadRequestException(`${field} must be a valid UUID`);
+    }
+
+    const trimmed = value.trim();
+    if (!UUID_REGEX.test(trimmed)) {
+      throw new BadRequestException(`${field} must be a valid UUID`);
+    }
+
+    return trimmed;
+  }
 
   private mapData(dto: CreateTeacherDto | UpdateTeacherDto) {
     const data: any = {};
+    const nullableUuidFields = new Set([
+      'photoMediaId',
+      'departmentId',
+      'ntrcaCertificateMediaId',
+      'primarySubjectId',
+      'globalPersonId',
+      'joiningSessionId',
+    ]);
     const fields = [
       'employeeCode',
       'fullName',
@@ -93,7 +140,18 @@ export class TeachersService {
 
     fields.forEach((field) => {
       if ((dto as any)[field] !== undefined) {
-        data[field] = (dto as any)[field];
+        const value = (dto as any)[field];
+        if (nullableUuidFields.has(field)) {
+          data[field] = this.normalizeOptionalUuid(value, field);
+          return;
+        }
+
+        if (field === 'designationId') {
+          data[field] = this.normalizeRequiredUuid(value, field);
+          return;
+        }
+
+        data[field] = value;
       }
     });
 
@@ -127,9 +185,19 @@ export class TeachersService {
       id: true,
       fullName: true,
       employeeCode: true,
+      primarySubjectId: true,
+      specializationSubjects: true,
       designation: {
         select: {
           name: true,
+        },
+      },
+      primarySubject: {
+        select: {
+          id: true,
+          enName: true,
+          bnName: true,
+          code: true,
         },
       },
     };
@@ -139,6 +207,7 @@ export class TeachersService {
     const tenantClient = this.tenantConnection.getTenantClient();
     const publicClient = this.prisma.client;
     const schemaName = this.tenantConnection.getTenantSchema();
+    const teacherData = this.mapData(dto);
 
     // 1. Generate unique employeeCode
     let employeeCode = '';
@@ -157,47 +226,101 @@ export class TeachersService {
       }
     }
 
-    // 2. Create User in public schema
+    // 2. Check if User already exists
+    const existingUser = await publicClient.user.findFirst({
+      where: {
+        OR: [
+          { phone: dto.phone },
+          ...(dto.email ? [{ email: dto.email }] : []),
+        ],
+        schemaName: schemaName,
+        deletedAt: null,
+      },
+    });
+
+    if (existingUser) {
+      if (existingUser.phone === dto.phone) {
+        throw new ConflictException('A user with this phone number already exists.');
+      }
+      if (dto.email && existingUser.email === dto.email) {
+        throw new ConflictException('A user with this email already exists.');
+      }
+    }
+
+    // 3. Create User in public schema
     const defaultPassword = dto.phone || 'password123';
     const hashedPassword = await bcrypt.hash(defaultPassword, 10);
 
-    const user = await publicClient.user.create({
-      data: {
-        email: dto.email || null,
-        phone: dto.phone,
-        password: hashedPassword,
-        schemaName: schemaName,
-        role: Role.TEACHER,
-      },
-    });
+    let createdUserId: string | null = null;
 
-    // 3. Create UserProfile in public schema
-    const nameParts = dto.fullName.trim().split(' ');
-    const firstName = nameParts[0];
-    const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : '';
+    try {
+      const username = await this.usernamesService.generateForSchema(
+        schemaName,
+        Role.TEACHER,
+        publicClient,
+      );
+      const user = await publicClient.user.create({
+        data: {
+          username,
+          email: dto.email || null,
+          phone: dto.phone,
+          password: hashedPassword,
+          schemaName: schemaName,
+          role: Role.TEACHER,
+        },
+      });
+      createdUserId = user.id;
 
-    await publicClient.userProfile.create({
-      data: {
-        userId: user.id,
-        firstName,
-        lastName,
-        gender: dto.gender,
-        dob: dto.dateOfBirth ? new Date(dto.dateOfBirth) : null,
-        bloodGroup: dto.bloodGroup,
-        religion: dto.religion,
-        nationality: dto.nationality,
-        phone: dto.phone,
-      },
-    });
+      // 4. Create UserProfile in public schema
+      const nameParts = dto.fullName.trim().split(' ');
+      const firstName = nameParts[0];
+      const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : '';
 
-    // 4. Map data and create Teacher in tenant schema
-    const data = this.mapData(dto);
-    data.employeeCode = employeeCode;
-    data.userId = user.id;
+      await publicClient.userProfile.create({
+        data: {
+          userId: user.id,
+          firstName,
+          lastName,
+          gender: dto.gender,
+          dob: dto.dateOfBirth ? new Date(dto.dateOfBirth) : null,
+          bloodGroup: dto.bloodGroup,
+          religion: dto.religion,
+          nationality: dto.nationality,
+          phone: dto.phone,
+        },
+      });
 
-    return tenantClient.teacher.create({
-      data,
-    });
+      // 5. Map data and create Teacher in tenant schema
+      const data = { ...teacherData };
+      data.employeeCode = employeeCode;
+      data.userId = user.id;
+
+      return await tenantClient.teacher.create({
+        data,
+      });
+    } catch (error: any) {
+      if (createdUserId) {
+        // Rollback created public login/profile if tenant teacher creation failed.
+        await publicClient.userProfile
+          .updateMany({
+            where: { userId: createdUserId },
+            data: { deletedAt: new Date() },
+          })
+          .catch(() => {});
+        await publicClient.user
+          .updateMany({
+            where: { id: createdUserId },
+            data: { deletedAt: new Date(), isActive: false },
+          })
+          .catch(() => {});
+      }
+      
+      if (error instanceof HttpException) {
+        throw error; // Preserve ConflictException or other HttpExceptions
+      }
+      
+      throw new BadRequestException(error.message || 'Error creating teacher');
+    }
   }
 
   async findShortList() {
@@ -207,12 +330,54 @@ export class TeachersService {
       select: this.getShortListSelect(),
       orderBy: { fullName: 'asc' },
     });
+    const specializationSubjectIds = Array.from(
+      new Set(
+        items.flatMap((teacher) =>
+          Array.isArray(teacher.specializationSubjects)
+            ? teacher.specializationSubjects.filter(
+                (subjectId: unknown): subjectId is string => typeof subjectId === 'string',
+              )
+            : [],
+        ),
+      ),
+    );
+    const specializationSubjects = specializationSubjectIds.length
+      ? await prisma.subject.findMany({
+          where: {
+            id: { in: specializationSubjectIds },
+            deletedAt: null,
+          },
+          select: {
+            id: true,
+            enName: true,
+            bnName: true,
+            code: true,
+          },
+          orderBy: { enName: 'asc' },
+        })
+      : [];
+    const subjectById = new Map(specializationSubjects.map((subject) => [subject.id, subject]));
+    const data = items.map((teacher) => {
+      const specializationSubjectItems = Array.isArray(teacher.specializationSubjects)
+        ? teacher.specializationSubjects
+            .filter((subjectId: unknown) => subjectId !== teacher.primarySubjectId)
+            .map((subjectId: unknown) =>
+              typeof subjectId === 'string' ? subjectById.get(subjectId) : null,
+            )
+            .filter(Boolean)
+        : [];
+
+      return {
+        ...teacher,
+        specializationSubjectItems,
+      };
+    });
 
     return {
       success: true,
       statusCode: 200,
       message: 'Teachers short list retrieved successfully',
-      data: items,
+      data,
       meta: null,
     };
   }

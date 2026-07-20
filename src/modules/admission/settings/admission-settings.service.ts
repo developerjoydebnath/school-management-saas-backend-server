@@ -14,6 +14,8 @@ import {
 
 @Injectable()
 export class AdmissionSettingsService {
+  private static runtimeColumnsEnsured = new Set<string>();
+
   constructor(private tenantConnection: TenantConnectionService) {}
 
   private prisma() {
@@ -22,6 +24,163 @@ export class AdmissionSettingsService {
 
   private response(message: string, data: any, statusCode = 200) {
     return { success: true, statusCode, message, data, meta: null };
+  }
+
+  private async ensureRuntimeColumns() {
+    const tenantSchema = this.tenantConnection.getTenantSchema();
+    const cacheKey = `${tenantSchema}:admission-settings-runtime-v2`;
+    if (AdmissionSettingsService.runtimeColumnsEnsured.has(cacheKey)) return;
+    const prisma = this.prisma();
+
+    await prisma.$executeRawUnsafe(`
+      CREATE SCHEMA IF NOT EXISTS "tenant"
+    `);
+
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "tenant".admission_settings (
+        id UUID PRIMARY KEY DEFAULT uuidv7(),
+        session_id UUID NOT NULL,
+        admission_mode VARCHAR(10) NOT NULL DEFAULT 'fast',
+        online_portal_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+        online_portal_slug VARCHAR(100),
+        online_portal_opens_at TIMESTAMPTZ,
+        online_portal_closes_at TIMESTAMPTZ,
+        default_admission_fee NUMERIC(10, 2),
+        application_prefix VARCHAR(10) NOT NULL DEFAULT 'ADM',
+        application_no_seq INTEGER NOT NULL DEFAULT 0,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        created_by UUID,
+        updated_by UUID,
+        deleted_at TIMESTAMPTZ,
+        deleted_by UUID
+      )
+    `);
+
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "tenant".admission_field_configs (
+        id UUID PRIMARY KEY DEFAULT uuidv7(),
+        settings_id UUID NOT NULL REFERENCES "tenant".admission_settings(id) ON DELETE CASCADE ON UPDATE CASCADE,
+        field_key VARCHAR(100) NOT NULL,
+        section VARCHAR(40) NOT NULL,
+        label VARCHAR(150) NOT NULL,
+        label_bn VARCHAR(150),
+        field_type VARCHAR(20) NOT NULL,
+        options JSONB,
+        placeholder VARCHAR(200),
+        help_text VARCHAR(300),
+        is_system BOOLEAN NOT NULL DEFAULT FALSE,
+        is_system_locked BOOLEAN NOT NULL DEFAULT FALSE,
+        is_shown BOOLEAN NOT NULL DEFAULT TRUE,
+        is_required BOOLEAN NOT NULL DEFAULT FALSE,
+        is_custom BOOLEAN NOT NULL DEFAULT FALSE,
+        depends_on_field_key VARCHAR(100),
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        min_length INTEGER,
+        max_length INTEGER,
+        min_value NUMERIC(12, 2),
+        max_value NUMERIC(12, 2),
+        regex_pattern VARCHAR(300),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        created_by UUID,
+        updated_by UUID,
+        deleted_at TIMESTAMPTZ,
+        deleted_by UUID
+      )
+    `);
+
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "tenant".admission_fee_heads (
+        id UUID PRIMARY KEY DEFAULT uuidv7(),
+        settings_id UUID NOT NULL REFERENCES "tenant".admission_settings(id) ON DELETE CASCADE ON UPDATE CASCADE,
+        name VARCHAR(120) NOT NULL,
+        name_bn VARCHAR(120),
+        code VARCHAR(60) NOT NULL,
+        type VARCHAR(30) NOT NULL DEFAULT 'one_time',
+        amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
+        is_system BOOLEAN NOT NULL DEFAULT FALSE,
+        is_shown BOOLEAN NOT NULL DEFAULT TRUE,
+        is_required BOOLEAN NOT NULL DEFAULT FALSE,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        description TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        created_by UUID,
+        updated_by UUID,
+        deleted_at TIMESTAMPTZ,
+        deleted_by UUID
+      )
+    `);
+
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "tenant".admission_fee_head_class_amounts (
+        id UUID PRIMARY KEY DEFAULT uuidv7(),
+        fee_head_id UUID NOT NULL REFERENCES "tenant".admission_fee_heads(id) ON DELETE CASCADE ON UPDATE CASCADE,
+        class_id UUID NOT NULL,
+        amount NUMERIC(12, 2) NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        created_by UUID,
+        updated_by UUID,
+        deleted_at TIMESTAMPTZ,
+        deleted_by UUID
+      )
+    `);
+
+    await prisma.$executeRawUnsafe(`
+      ALTER TABLE "tenant".admission_settings
+        ADD COLUMN IF NOT EXISTS draft_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+        ADD COLUMN IF NOT EXISTS discount_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+        ADD COLUMN IF NOT EXISTS discount_type VARCHAR(20) NOT NULL DEFAULT 'fixed_amount',
+        ADD COLUMN IF NOT EXISTS discount_scope VARCHAR(30) NOT NULL DEFAULT 'required_total',
+        ADD COLUMN IF NOT EXISTS discount_value NUMERIC(12, 2) NOT NULL DEFAULT 0,
+        ADD COLUMN IF NOT EXISTS discount_max_amount NUMERIC(12, 2),
+        ADD COLUMN IF NOT EXISTS discount_stacking_mode VARCHAR(20) NOT NULL DEFAULT 'stack_all',
+        ADD COLUMN IF NOT EXISTS manual_discount_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+        ADD COLUMN IF NOT EXISTS quota_discount_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+        ADD COLUMN IF NOT EXISTS quota_discount_rules JSONB NOT NULL DEFAULT '[]'::jsonb,
+        ADD COLUMN IF NOT EXISTS reference_enabled BOOLEAN NOT NULL DEFAULT TRUE
+    `);
+
+    await prisma.$executeRawUnsafe(`
+      ALTER TABLE "tenant".admission_field_configs
+        ADD COLUMN IF NOT EXISTS show_in_fast_mode BOOLEAN NOT NULL DEFAULT TRUE,
+        ADD COLUMN IF NOT EXISTS show_in_full_mode BOOLEAN NOT NULL DEFAULT TRUE,
+        ADD COLUMN IF NOT EXISTS required_in_fast_mode BOOLEAN NOT NULL DEFAULT FALSE,
+        ADD COLUMN IF NOT EXISTS required_in_full_mode BOOLEAN NOT NULL DEFAULT FALSE
+    `);
+
+    await prisma.$executeRawUnsafe(`
+      CREATE UNIQUE INDEX IF NOT EXISTS admission_settings_session_id_uidx
+        ON "tenant".admission_settings (session_id)
+    `);
+    await prisma.$executeRawUnsafe(`
+      CREATE UNIQUE INDEX IF NOT EXISTS admission_field_configs_settings_field_uidx
+        ON "tenant".admission_field_configs (settings_id, field_key)
+    `);
+    await prisma.$executeRawUnsafe(`
+      CREATE UNIQUE INDEX IF NOT EXISTS admission_fee_heads_settings_code_uidx
+        ON "tenant".admission_fee_heads (settings_id, code)
+    `);
+    await prisma.$executeRawUnsafe(`
+      CREATE UNIQUE INDEX IF NOT EXISTS admission_fee_head_class_amounts_head_class_uidx
+        ON "tenant".admission_fee_head_class_amounts (fee_head_id, class_id)
+    `);
+    await prisma.$executeRawUnsafe(`
+      CREATE INDEX IF NOT EXISTS admission_settings_deleted_at_idx
+        ON "tenant".admission_settings (deleted_at)
+    `);
+    await prisma.$executeRawUnsafe(`
+      CREATE INDEX IF NOT EXISTS admission_field_configs_settings_section_idx
+        ON "tenant".admission_field_configs (settings_id, section)
+    `);
+    await prisma.$executeRawUnsafe(`
+      CREATE INDEX IF NOT EXISTS admission_fee_heads_settings_id_idx
+        ON "tenant".admission_fee_heads (settings_id)
+    `);
+
+    AdmissionSettingsService.runtimeColumnsEnsured.add(cacheKey);
   }
 
   private normalizeSettings(dto: UpsertAdmissionSettingsDto, userId?: string) {
@@ -52,6 +211,7 @@ export class AdmissionSettingsService {
         dto.discountValue === undefined ? undefined : dto.discountValue,
       discountMaxAmount:
         dto.discountMaxAmount === undefined ? undefined : dto.discountMaxAmount,
+      discountStackingMode: dto.discountStackingMode,
       manualDiscountEnabled,
       quotaDiscountEnabled: dto.quotaDiscountEnabled,
       quotaDiscountRules: dto.quotaDiscountRules ?? undefined,
@@ -245,6 +405,7 @@ export class AdmissionSettingsService {
   }
 
   async ensureSettings(sessionId: string, userId?: string) {
+    await this.ensureRuntimeColumns();
     const prisma = this.prisma();
     let settings = await prisma.admissionSettings.findFirst({
       where: { sessionId, deletedAt: null },
@@ -769,7 +930,7 @@ export class AdmissionSettingsService {
       };
     }
 
-    const appliedRules = rules.map((rule: any) => {
+    const calculatedRules = rules.map((rule: any) => {
       const discountBase = Math.max(Number(baseByScope[rule.scope] || 0), 0);
       let amount =
         rule.type === 'percentage'
@@ -784,6 +945,13 @@ export class AdmissionSettingsService {
         amount: Number(amount.toFixed(2)),
       };
     });
+    const appliedRules =
+      settings.discountStackingMode === 'best_only'
+        ? calculatedRules
+            .slice()
+            .sort((a: any, b: any) => Number(b.amount || 0) - Number(a.amount || 0))
+            .slice(0, 1)
+        : calculatedRules;
     const rawDiscountAmount = appliedRules.reduce(
       (sum: number, rule: any) => sum + rule.amount,
       0,
@@ -870,6 +1038,7 @@ export class AdmissionSettingsService {
         discountValue: Number(settings.discountValue || 0),
         discountMaxAmount:
           settings.discountMaxAmount === null ? null : Number(settings.discountMaxAmount),
+        discountStackingMode: settings.discountStackingMode || 'stack_all',
         manualDiscountEnabled: settings.manualDiscountEnabled,
         quotaDiscountEnabled: settings.quotaDiscountEnabled,
         quotaDiscountRules: settings.quotaDiscountRules,

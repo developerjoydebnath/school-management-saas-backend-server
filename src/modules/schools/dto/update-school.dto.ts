@@ -1,5 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   IsArray,
   IsBoolean,
@@ -9,6 +9,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  Matches,
   MaxLength,
   IsUrl,
   ValidateIf,
@@ -20,6 +21,22 @@ export class UpdateSchoolDto {
   @IsString()
   @MaxLength(255)
   schoolName?: string;
+
+  @ApiPropertyOptional({
+    example: 'DMHS',
+    description:
+      'Immutable short code used as the prefix segment in generated school usernames.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(10)
+  @Matches(/^[A-Z0-9]{2,10}$/i, {
+    message: 'schoolShortCode must be 2-10 letters or numbers',
+  })
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.trim().toUpperCase() : value,
+  )
+  schoolShortCode?: string;
 
   @ApiPropertyOptional({ example: 'ঢাকা মডেল হাই স্কুল' })
   @IsOptional()

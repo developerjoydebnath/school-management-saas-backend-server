@@ -202,12 +202,32 @@ export const PERMISSIONS = {
       ALL: 'students.directory.all',
       VIEW: 'students.directory.view',
     },
+    PAYMENTS: {
+      ALL: 'students.payments.all',
+      VIEW: 'students.payments.view',
+    },
     PROFILE: {
       ALL: 'students.profile.all',
       VIEW: 'students.profile.view',
       EDIT: 'students.profile.update',
       STATUS: 'students.status.update',
       DELETE: 'students.delete',
+    },
+  },
+  SETTINGS: {
+    VIEW: 'settings.view',
+    ALL: 'settings.all',
+    PAYMENT_METHODS: {
+      ALL: 'settings.payment_methods.all',
+      VIEW: 'settings.payment_methods.view',
+      CREATE: 'settings.payment_methods.create',
+      EDIT: 'settings.payment_methods.edit',
+      DELETE: 'settings.payment_methods.delete',
+    },
+    MAIL_SETTINGS: {
+      ALL: 'settings.mail_settings.all',
+      VIEW: 'settings.mail_settings.view',
+      EDIT: 'settings.mail_settings.edit',
     },
   },
   // Add other modules permissions here as needed

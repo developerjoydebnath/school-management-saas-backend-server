@@ -1,11 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { School } from '@prisma/client';
+import { Role, School } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
-import * as nodemailer from 'nodemailer';
 import { PrismaService } from '../../cores/prisma.service';
 import { InventorySeedService } from '../inventory/inventory-seed.service';
+import { MailQueueService } from '../mail-queue/mail-queue.service';
 import { SchoolsMigrationService } from './schools.migration.service';
+import { UsernamesService } from '../usernames/usernames.service';
 import { getWelcomeEmailTemplate } from './templates/welcome-email.template';
 import { getRejectionEmailTemplate } from './templates/rejection-email.template';
 import { getConfirmationEmailTemplate } from './templates/confirmation-email.template';
@@ -18,6 +19,8 @@ export class SchoolsActivationService {
     private readonly prisma: PrismaService,
     private readonly migrationService: SchoolsMigrationService,
     private readonly inventorySeedService: InventorySeedService,
+    private readonly mailQueueService: MailQueueService,
+    private readonly usernamesService: UsernamesService,
   ) {}
 
   /**
@@ -114,10 +117,16 @@ export class SchoolsActivationService {
     this.logger.log(
       `  Creating school admin user in public.users (email: ${school.contactEmail})`,
     );
+    const username = await this.usernamesService.generateForSchool(
+      school.id,
+      Role.SCHOOL_ADMIN,
+      tx,
+    );
 
     // Insert into global public.users table via Prisma
     const user = await tx.user.create({
       data: {
+        username,
         email: school.contactEmail,
         phone: school.contactPhone,
         password: hashedPassword,
@@ -185,18 +194,6 @@ export class SchoolsActivationService {
     );
   }
 
-  private getTransporter() {
-    return nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: parseInt(process.env.SMTP_PORT || '587'),
-      secure: false,
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-      },
-    });
-  }
-
   private async sendWelcomeEmail(
     school: School,
     tempPassword: string,
@@ -204,9 +201,8 @@ export class SchoolsActivationService {
     const appDomain = process.env.APP_DOMAIN || 'yourdomain.com';
     const subdomain = `${school.schoolSlug}.${appDomain}`;
 
-    const transporter = this.getTransporter();
-    await transporter.sendMail({
-      from: `"EduCore" <${process.env.SMTP_USER}>`,
+    const result = await this.mailQueueService.enqueue({
+      scope: 'platform',
       to: school.contactEmail,
       subject: `Welcome to EduCore — Your school is ready!`,
       html: getWelcomeEmailTemplate(
@@ -217,7 +213,13 @@ export class SchoolsActivationService {
       ),
     });
 
-    this.logger.log(`Welcome email sent to: ${school.contactEmail}`);
+    if (result.queued) {
+      this.logger.log(`Welcome email queued for: ${school.contactEmail}`);
+    } else {
+      this.logger.warn(
+        `Welcome email not queued for ${school.contactEmail}: ${result.reason}`,
+      );
+    }
   }
 
   async sendRejectionEmail(
@@ -225,13 +227,18 @@ export class SchoolsActivationService {
     adminName: string,
     reason?: string,
   ): Promise<void> {
-    const transporter = this.getTransporter();
-    await transporter.sendMail({
-      from: `"EduCore" <${process.env.SMTP_USER}>`,
+    const result = await this.mailQueueService.enqueue({
+      scope: 'platform',
       to: school.contactEmail,
       subject: `Update on your EduCore application — ${school.schoolName}`,
       html: getRejectionEmailTemplate(school.schoolName, adminName, reason),
     });
+
+    if (!result.queued) {
+      this.logger.warn(
+        `Rejection email not queued for ${school.contactEmail}: ${result.reason}`,
+      );
+    }
   }
 
   async sendConfirmationEmail(
@@ -239,12 +246,17 @@ export class SchoolsActivationService {
     adminName: string,
     contactEmail: string,
   ): Promise<void> {
-    const transporter = this.getTransporter();
-    await transporter.sendMail({
-      from: `"EduCore" <${process.env.SMTP_USER}>`,
+    const result = await this.mailQueueService.enqueue({
+      scope: 'platform',
       to: contactEmail,
       subject: `We received your application — ${schoolName}`,
       html: getConfirmationEmailTemplate(schoolName, adminName),
     });
+
+    if (!result.queued) {
+      this.logger.warn(
+        `Confirmation email not queued for ${contactEmail}: ${result.reason}`,
+      );
+    }
   }
 }

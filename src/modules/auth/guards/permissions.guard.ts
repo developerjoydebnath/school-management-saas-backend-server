@@ -38,7 +38,8 @@ export class PermissionsGuard implements CanActivate {
     }
 
     // Bypass permission check for SUPER_ADMIN and DEVELOPER
-    if (user.role === Role.SUPER_ADMIN || user.role === Role.DEVELOPER) {
+    const role = String(user.role || '').toUpperCase();
+    if (role === Role.SUPER_ADMIN || role === Role.DEVELOPER) {
       return true;
     }
 

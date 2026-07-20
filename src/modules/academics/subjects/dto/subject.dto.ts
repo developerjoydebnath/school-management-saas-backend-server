@@ -7,7 +7,7 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
-  IsUUID,
+  Matches,
   MaxLength,
   Min,
 } from 'class-validator';
@@ -26,6 +26,9 @@ export enum SubjectMarkDivisionEnum {
   WRITTEN_MCQ = 'WRITTEN_MCQ',
   WRITTEN_MCQ_PRACTICAL = 'WRITTEN_MCQ_PRACTICAL',
 }
+
+const UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export class CreateSubjectDto {
   @IsString()
@@ -129,7 +132,10 @@ export class CreateSubjectDto {
 
   @IsArray()
   @ArrayUnique()
-  @IsUUID('4', { each: true })
+  @Matches(UUID_REGEX, {
+    each: true,
+    message: 'each value in classIds must be a UUID',
+  })
   @IsOptional()
   classIds?: string[];
 
@@ -244,7 +250,10 @@ export class UpdateSubjectDto {
 
   @IsArray()
   @ArrayUnique()
-  @IsUUID('4', { each: true })
+  @Matches(UUID_REGEX, {
+    each: true,
+    message: 'each value in classIds must be a UUID',
+  })
   @IsOptional()
   classIds?: string[];
 

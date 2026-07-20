@@ -7,9 +7,10 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  Matches,
   MaxLength,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 
 /**
  * Used when a super admin creates a school directly.
@@ -22,6 +23,22 @@ export class CreateSchoolAdminDto {
   @IsNotEmpty()
   @MaxLength(255)
   schoolName: string;
+
+  @ApiProperty({
+    example: 'SGC',
+    description:
+      'Immutable short code used as the prefix segment in generated school usernames.',
+  })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(10)
+  @Matches(/^[A-Z0-9]{2,10}$/i, {
+    message: 'schoolShortCode must be 2-10 letters or numbers',
+  })
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.trim().toUpperCase() : value,
+  )
+  schoolShortCode: string;
 
   @ApiProperty({
     enum: ['school', 'madrasa', 'college', 'university_college'],

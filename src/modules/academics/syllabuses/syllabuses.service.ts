@@ -4,7 +4,10 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { TenantConnectionService } from 'src/cores/prisma.service';
+import {
+  PrismaService,
+  TenantConnectionService,
+} from 'src/cores/prisma.service';
 import {
   CreateSyllabusDto,
   SyllabusStatusEnum,
@@ -14,7 +17,10 @@ import {
 
 @Injectable()
 export class SyllabusesService {
-  constructor(private tenantConnection: TenantConnectionService) {}
+  constructor(
+    private tenantConnection: TenantConnectionService,
+    private prismaService: PrismaService,
+  ) {}
 
   private get prisma(): any {
     return this.tenantConnection.getTenantClient() as any;
@@ -35,6 +41,27 @@ export class SyllabusesService {
       .split(',')
       .map((item) => item.trim())
       .filter(Boolean);
+  }
+
+  private async getFallbackSessionId() {
+    const selectedSessionId = this.tenantConnection.getAcademicSessionId();
+    if (selectedSessionId) return selectedSessionId;
+
+    const activeSession = await this.prismaService.client.academicSession.findFirst({
+      where: { status: 'ACTIVE' },
+      select: { id: true },
+      orderBy: { year: 'desc' },
+    });
+
+    return activeSession?.id || null;
+  }
+
+  private async resolveSessionFilter(query: any = {}) {
+    const explicitSessions = this.parseList(query.sessionIds || query.sessionId);
+    if (explicitSessions.length) return explicitSessions;
+
+    const fallbackSessionId = await this.getFallbackSessionId();
+    return fallbackSessionId ? [fallbackSessionId] : [];
   }
 
   private parseDate(value?: string, end = false) {
@@ -221,14 +248,15 @@ export class SyllabusesService {
           })
         : Promise.resolve(null),
       sectionIds.length
-        ? this.prisma.section.findMany({
+        ? this.prisma.sessionClassSection.findMany({
             where: {
-              id: { in: sectionIds },
+              sessionId,
               classId,
+              sectionId: { in: sectionIds },
               deletedAt: null,
               status: 'ACTIVE',
             },
-            select: { id: true },
+            select: { sectionId: true },
           })
         : Promise.resolve([]),
       subjectIds.length
@@ -256,7 +284,8 @@ export class SyllabusesService {
     if (exam && sessionId && exam.sessionId !== sessionId) {
       throw new BadRequestException('Exam does not belong to the selected session');
     }
-    if (sections.length !== sectionIds.length) {
+    const offeredSectionIds = new Set(sections.map((item: any) => item.sectionId).filter(Boolean));
+    if (offeredSectionIds.size !== sectionIds.length) {
       throw new BadRequestException('One or more selected sections were not found');
     }
     if (subjects.length !== subjectIds.length) {
@@ -383,6 +412,20 @@ export class SyllabusesService {
     });
   }
 
+  private toJsonSafe(value: any): any {
+    if (value === null || value === undefined) return value;
+    if (value instanceof Date) return value.toISOString();
+    if (typeof value === 'bigint') return value.toString();
+    if (Array.isArray(value)) return value.map((item) => this.toJsonSafe(item));
+    if (typeof value === 'object') {
+      if (typeof value.toNumber === 'function') return value.toNumber();
+      return Object.fromEntries(
+        Object.entries(value).map(([key, item]) => [key, this.toJsonSafe(item)]),
+      );
+    }
+    return value;
+  }
+
   private async writeHistory(
     tx: any,
     syllabusId: string,
@@ -403,7 +446,7 @@ export class SyllabusesService {
         changeType,
         changedBy: changedBy || null,
         summary: summary || null,
-        snapshot,
+        snapshot: this.toJsonSafe(snapshot),
       },
     });
   }
@@ -470,7 +513,9 @@ export class SyllabusesService {
     const limit = this.parseLimit(query.limit);
     const where: any = { deletedAt: null };
 
-    if (query.sessionId) where.sessionId = query.sessionId;
+    const sessionIds = await this.resolveSessionFilter(query);
+    if (sessionIds.length === 1) where.sessionId = sessionIds[0];
+    if (sessionIds.length > 1) where.sessionId = { in: sessionIds };
     if (query.examId) where.examId = query.examId;
     if (query.classId) where.classId = query.classId;
     if (query.sectionId) where.sectionId = query.sectionId;

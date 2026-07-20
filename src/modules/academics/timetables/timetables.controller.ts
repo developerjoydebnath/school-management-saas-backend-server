@@ -27,7 +27,7 @@ export class TimetablesController {
 
   @Get('current')
   @ApiOperation({ summary: 'Get current timetable for class or section' })
-  @ApiQuery({ name: 'sessionId', required: true })
+  @ApiQuery({ name: 'sessionId', required: false })
   @ApiQuery({ name: 'classId', required: true })
   @ApiQuery({ name: 'sectionId', required: false })
   @RequirePermissions(PERMISSIONS.TIMETABLE.VIEW, PERMISSIONS.TIMETABLE.ALL)
@@ -90,7 +90,7 @@ export class TimetablesController {
 
   @Get('print')
   @ApiOperation({ summary: 'Download selected class or section timetable PDF' })
-  @ApiQuery({ name: 'sessionId', required: true })
+  @ApiQuery({ name: 'sessionId', required: false })
   @ApiQuery({ name: 'classId', required: true })
   @ApiQuery({ name: 'sectionIds', required: false })
   @ApiQuery({ name: 'locale', required: false })

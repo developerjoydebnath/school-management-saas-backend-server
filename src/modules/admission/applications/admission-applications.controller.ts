@@ -135,4 +135,15 @@ export class AdmissionApplicationsController {
   waitlist(@Param('id') id: string, @Body() dto: WaitlistAdmissionDto, @Req() req: any) {
     return this.service.waitlist(id, dto, this.userId(req));
   }
+
+  @Post(':id/eligible-for-payment')
+  @ApiOperation({ summary: 'Mark admission application eligible for payment' })
+  @RequirePermissions(
+    PERMISSIONS.ADMISSION.APPLICATIONS.EDIT,
+    PERMISSIONS.ADMISSION.APPLICATIONS.ALL,
+    PERMISSIONS.ADMISSION.ALL,
+  )
+  markEligibleForPayment(@Param('id') id: string, @Req() req: any) {
+    return this.service.markEligibleForPayment(id, this.userId(req));
+  }
 }

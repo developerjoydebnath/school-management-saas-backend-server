@@ -8,10 +8,14 @@ import {
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { JwtStrategy } from './strategies/jwt.strategy';
+import { MailQueueModule } from '../mail-queue/mail-queue.module';
+import { UsernamesModule } from '../usernames/usernames.module';
 
 @Module({
   imports: [
     PassportModule,
+    MailQueueModule,
+    UsernamesModule,
     JwtModule.register({
       secret: process.env.JWT_ACCESS_SECRET,
       signOptions: { expiresIn: '1h' },

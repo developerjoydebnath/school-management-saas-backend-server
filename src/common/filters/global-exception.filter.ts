@@ -38,8 +38,9 @@ export class GlobalExceptionFilter implements ExceptionFilter {
         message = exception.message;
       }
     } else {
-      // Do not expose raw database/runtime errors to API clients.
-      message = 'Internal Server Error';
+      // Temporarily expose raw errors for debugging
+      message = exception?.message || 'Internal Server Error';
+      errors = exception?.stack || String(exception);
     }
 
     response.status(status).json({

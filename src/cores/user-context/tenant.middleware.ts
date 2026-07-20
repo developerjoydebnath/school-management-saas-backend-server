@@ -4,6 +4,7 @@ import * as jwt from 'jsonwebtoken';
 
 interface TenantRequest extends Request {
   tenant?: string;
+  academicSessionId?: string;
 }
 
 function toSchemaName(slug: string): string {
@@ -31,6 +32,13 @@ function extractSubdomain(hostname: string): string | null {
   return null;
 }
 
+function firstHeaderValue(value: string | string[] | undefined): string {
+  if (Array.isArray(value)) {
+    return value[0] || '';
+  }
+  return value || '';
+}
+
 @Injectable()
 export class TenantMiddleware implements NestMiddleware {
   use(req: Request, res: Response, next: NextFunction) {
@@ -55,8 +63,16 @@ export class TenantMiddleware implements NestMiddleware {
     // Public admission portal pages may be hosted outside the tenant subdomain
     // during embedding/testing. Accept an explicit tenant hint only for that
     // unauthenticated public admission route; protected APIs still use JWT first.
-    if (tenantSchema === 'public' && req.path.includes('/public/admission/')) {
-      const tenantHint = req.headers['x-tenant-slug'] || req.headers['x-tenant-schema'];
+    if (
+      tenantSchema === 'public' &&
+      (req.path.includes('/public/admission/') ||
+        req.path.includes('/payments/sslcommerz/'))
+    ) {
+      const tenantHint =
+        req.headers['x-tenant-slug'] ||
+        req.headers['x-tenant-schema'] ||
+        (req.query?.tenant as string | undefined) ||
+        (req.query?.schema as string | undefined);
       const rawTenant = Array.isArray(tenantHint) ? tenantHint[0] : tenantHint;
       if (rawTenant) {
         tenantSchema = toSchemaName(rawTenant);
@@ -67,7 +83,12 @@ export class TenantMiddleware implements NestMiddleware {
     // When the frontend and backend share the same domain/port (e.g. proxied),
     // the Host header already contains the subdomain.
     if (tenantSchema === 'public') {
-      const subdomain = extractSubdomain(req.headers.host || '');
+      const forwardedHost =
+        firstHeaderValue(req.headers['x-forwarded-host']) ||
+        firstHeaderValue(req.headers['x-original-host']) ||
+        req.headers.host ||
+        '';
+      const subdomain = extractSubdomain(forwardedHost);
       if (subdomain) {
         tenantSchema = toSchemaName(subdomain);
       }
@@ -83,7 +104,10 @@ export class TenantMiddleware implements NestMiddleware {
     //   → Host: lvh.me:5000  (no subdomain)
     //   → Origin: http://sylhet_government_college.lvh.me:3000  ← we read this
     if (tenantSchema === 'public') {
-      const origin = req.headers.origin || req.headers.referer || '';
+      const origin =
+        firstHeaderValue(req.headers['x-original-origin']) ||
+        firstHeaderValue(req.headers.origin) ||
+        firstHeaderValue(req.headers.referer);
       if (origin) {
         try {
           const originUrl = new URL(origin);
@@ -99,6 +123,14 @@ export class TenantMiddleware implements NestMiddleware {
 
     // Attach the detected tenant schema to the request
     (req as TenantRequest).tenant = tenantSchema;
+    const academicSessionHeader = req.headers['x-academic-session-id'];
+    const academicSessionId = Array.isArray(academicSessionHeader)
+      ? academicSessionHeader[0]
+      : academicSessionHeader;
+    (req as TenantRequest).academicSessionId =
+      typeof academicSessionId === 'string' && academicSessionId.trim()
+        ? academicSessionId.trim()
+        : undefined;
 
     next();
   }

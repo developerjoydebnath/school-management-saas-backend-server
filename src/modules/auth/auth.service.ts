@@ -4,13 +4,15 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { Role } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
-import * as nodemailer from 'nodemailer';
 import {
   PrismaService,
   TenantConnectionService,
 } from '../../cores/prisma.service';
+import { MailQueueService } from '../mail-queue/mail-queue.service';
+import { UsernamesService } from '../usernames/usernames.service';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { SignInDto } from './dto/sign-in.dto';
 import { SignUpDto } from './dto/sign-up.dto';
@@ -21,15 +23,19 @@ export class AuthService {
     private jwtService: JwtService,
     private tenantConnection: TenantConnectionService,
     private prismaService: PrismaService,
+    private readonly mailQueueService: MailQueueService,
+    private readonly usernamesService: UsernamesService,
   ) {}
 
   async signUp(dto: SignUpDto) {
+    await this.usernamesService.ensureRuntimeObjects();
     const schemaName = this.tenantConnection.getTenantSchema();
     const hashedPassword = await bcrypt.hash(dto.password, 10);
 
     // Create user in global public.users table
     const user = await this.prismaService.user.create({
       data: {
+        username: dto.email.trim().toLowerCase(),
         email: dto.email,
         password: hashedPassword,
         schemaName,
@@ -71,11 +77,15 @@ export class AuthService {
    * No raw SQL — uses Prisma typed where with a dynamic field key.
    */
   async signIn(dto: SignInDto) {
+    await this.usernamesService.ensureRuntimeObjects();
     const schemaName = this.tenantConnection.getTenantSchema();
-    const { identifier, password } = dto;
+    const { password } = dto;
+    const identifier = dto.identifier.trim();
 
     // ── Detect identifier type ────────────────────────────────────────────────
-    const isStudentCode = /^STU-\d{4}-\d+$/i.test(identifier);
+    const isStudentCode =
+      /^STU-\d{4}-\d+$/i.test(identifier) ||
+      /^STU-[A-Z0-9]{2,10}-\d+$/i.test(identifier);
     const isPhone = /^01[3-9]\d{8}$/.test(identifier);
     const isEmail = identifier.includes('@');
 
@@ -91,7 +101,14 @@ export class AuthService {
 
     if (isStudentCode) {
       user = await this.prismaService.user.findFirst({
-        where: { studentCode: identifier, schemaName },
+        where: {
+          schemaName,
+          deletedAt: null,
+          OR: [
+            { studentCode: identifier.toUpperCase() },
+            { username: identifier.toUpperCase() },
+          ],
+        },
       });
     } else if (isPhone) {
       user = await this.prismaService.user.findFirst({
@@ -99,12 +116,16 @@ export class AuthService {
       });
     } else {
       user = await this.prismaService.user.findFirst({
-        where: { email: identifier, schemaName },
+        where: { email: identifier, schemaName, role: { not: Role.STUDENT } },
       });
     }
 
     if (!user || !user.isActive) {
       throw new UnauthorizedException('Invalid credentials');
+    }
+
+    if (user.role === Role.STUDENT && !isStudentCode) {
+      throw new UnauthorizedException('Students must sign in with Student ID');
     }
 
     const isPasswordValid = await bcrypt.compare(password, user.password);
@@ -136,6 +157,7 @@ export class AuthService {
       email: user.email,
       phone: user.phone,
       studentCode: user.studentCode,
+      username: user.username,
       schema: user.schemaName,
       role: user.role,
       profileId: profile.id,
@@ -163,6 +185,7 @@ export class AuthService {
           email: user.email,
           phone: user.phone,
           studentCode: user.studentCode,
+          username: user.username,
           schema: user.schemaName,
           role: user.role,
           profileId: profile.id,
@@ -233,22 +256,10 @@ export class AuthService {
     return { message: 'Logged out successfully' };
   }
 
-  private getTransporter() {
-    return nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: parseInt(process.env.SMTP_PORT || '587'),
-      secure: false,
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-      },
-    });
-  }
-
   async forgotPassword(email: string) {
     const schemaName = this.tenantConnection.getTenantSchema();
     const user = await this.prismaService.user.findFirst({
-      where: { email, schemaName },
+      where: { email, schemaName, role: { not: Role.STUDENT } },
     });
 
     if (!user) {
@@ -273,19 +284,14 @@ export class AuthService {
       },
     });
 
-    try {
-      const transporter = this.getTransporter();
-      await transporter.sendMail({
-        from: `"School App" <${process.env.SMTP_USER}>`,
-        // TODO: if student then send reset via sms or mail to student's parents.
-        to: user.email ?? undefined, // email is nullable (students may not have one); undefined is safe, null is not
-        subject: 'Password Reset OTP',
-        text: `Your password reset OTP is ${otp}. It is valid for 15 minutes.`,
-        html: `<p>Your password reset OTP is <b>${otp}</b>. It is valid for 15 minutes.</p>`,
-      });
-    } catch (e) {
-      console.error('Failed to send OTP email:', e);
-    }
+    await this.mailQueueService.enqueue({
+      scope: 'tenant',
+      schema: schemaName,
+      to: user.email ?? '',
+      subject: 'Password Reset OTP',
+      text: `Your password reset OTP is ${otp}. It is valid for 15 minutes.`,
+      html: `<p>Your password reset OTP is <b>${otp}</b>. It is valid for 15 minutes.</p>`,
+    });
 
     return {
       message:
@@ -296,7 +302,7 @@ export class AuthService {
   async resetPassword(dto: ResetPasswordDto) {
     const schemaName = this.tenantConnection.getTenantSchema();
     const user = await this.prismaService.user.findFirst({
-      where: { email: dto.email, schemaName },
+      where: { email: dto.email, schemaName, role: { not: Role.STUDENT } },
     });
 
     if (!user || !user.resetOtp || !user.resetOtpExpires) {

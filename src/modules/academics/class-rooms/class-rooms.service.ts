@@ -206,15 +206,9 @@ export class ClassRoomsService {
     const prisma = this.tenantConnection.getTenantClient();
     await this.findOne(id);
 
-    const [classCount, sectionCount] = await Promise.all([
-      prisma.class.count({
-        where: { classRoomId: id, deletedAt: null },
-      }),
-      prisma.section.count({
-        where: { classRoomId: id, deletedAt: null },
-      }),
-    ]);
-    const used = classCount + sectionCount;
+    const used = await prisma.sessionClassSection.count({
+      where: { roomId: id, deletedAt: null },
+    });
     if (used > 0) {
       throw new BadRequestException('This class room is assigned to a class');
     }

@@ -3,12 +3,18 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { TenantConnectionService } from 'src/cores/prisma.service';
+import {
+  PrismaService,
+  TenantConnectionService,
+} from 'src/cores/prisma.service';
 import { UpdateStudentDto, UpdateStudentStatusDto } from './dto/student.dto';
 
 @Injectable()
 export class StudentsService {
-  constructor(private tenantConnection: TenantConnectionService) {}
+  constructor(
+    private tenantConnection: TenantConnectionService,
+    private prismaService: PrismaService,
+  ) {}
 
   private prisma() {
     return this.tenantConnection.getTenantClient();
@@ -71,6 +77,29 @@ export class StudentsService {
       sectionName: item.section?.name || null,
       contact: item.fatherMobile,
     };
+  }
+
+  private optionalText(value: any) {
+    if (value === undefined || value === null) return null;
+    const text = String(value).trim();
+    return text ? text : null;
+  }
+
+  private normalizeEmail(value: any) {
+    const email = this.optionalText(value)?.toLowerCase();
+    if (!email) return null;
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      throw new BadRequestException('Student email must be a valid email address');
+    }
+    return email;
+  }
+
+  private async syncStudentProfileEmail(student: any, email: string | null) {
+    if (!student?.userId) return;
+    await this.prismaService.client.userProfile.updateMany({
+      where: { userId: student.userId },
+      data: { email },
+    });
   }
 
   private buildWhere(query: any = {}) {
@@ -140,6 +169,8 @@ export class StudentsService {
     const prisma = this.prisma();
     const where = this.buildWhere(query);
     delete where.classId;
+    const sessionId =
+      query.sessionId || this.tenantConnection.getAcademicSessionId?.() || null;
     const [classes, groupedCounts] = await Promise.all([
       prisma.class.findMany({
         where: { deletedAt: null, status: 'ACTIVE' },
@@ -147,11 +178,6 @@ export class StudentsService {
           id: true,
           enName: true,
           bnName: true,
-          sections: {
-            where: { deletedAt: null },
-            select: { id: true, name: true },
-            orderBy: { name: 'asc' },
-          },
         },
         orderBy: { enName: 'asc' },
       }),
@@ -161,6 +187,31 @@ export class StudentsService {
         _count: { _all: true },
       }),
     ]);
+    const classIds = classes.map((item) => item.id);
+    const sectionSetups =
+      sessionId && classIds.length
+        ? await prisma.sessionClassSection.findMany({
+            where: {
+              sessionId,
+              classId: { in: classIds },
+              sectionId: { not: null },
+              deletedAt: null,
+              status: 'ACTIVE',
+            },
+            select: {
+              classId: true,
+              section: { select: { id: true, name: true } },
+            },
+            orderBy: [{ section: { sortOrder: 'asc' } }, { section: { name: 'asc' } }],
+          })
+        : [];
+    const sectionsByClass = new Map<string, Array<{ id: string; name: string }>>();
+    for (const setup of sectionSetups) {
+      if (!setup.section) continue;
+      const current = sectionsByClass.get(setup.classId) || [];
+      current.push({ id: setup.section.id, name: setup.section.name });
+      sectionsByClass.set(setup.classId, current);
+    }
 
     const countByClass = new Map<string, number>();
     const countBySection = new Map<string, number>();
@@ -181,7 +232,7 @@ export class StudentsService {
         name: item.enName,
         bnName: item.bnName,
         totalStudents: countByClass.get(item.id) || 0,
-        sections: item.sections.map((section) => ({
+        sections: (sectionsByClass.get(item.id) || []).map((section) => ({
           id: section.id,
           name: section.name,
           count: countBySection.get(section.id) || 0,
@@ -207,11 +258,19 @@ export class StudentsService {
   }
 
   async update(id: string, dto: UpdateStudentDto, userId?: string) {
-    await this.findOne(id);
+    const existingResponse = await this.findOne(id);
+    const existing = existingResponse.data;
+    const { studentEmail, email, ...studentData } = dto as any;
+    const hasEmailChange =
+      email !== undefined || studentEmail !== undefined;
+    const normalizedEmail = hasEmailChange
+      ? this.normalizeEmail(email ?? studentEmail)
+      : undefined;
     const updated = await this.prisma().student.update({
       where: { id },
       data: {
-        ...dto,
+        ...studentData,
+        ...(hasEmailChange ? { email: normalizedEmail } : {}),
         dateOfBirth: dto.dateOfBirth ? new Date(dto.dateOfBirth) : undefined,
         admissionDate: dto.admissionDate ? new Date(dto.admissionDate) : undefined,
         transferDate: dto.transferDate ? new Date(dto.transferDate) : undefined,
@@ -219,6 +278,9 @@ export class StudentsService {
       },
       include: this.detailsInclude(),
     });
+    if (hasEmailChange) {
+      await this.syncStudentProfileEmail(updated, normalizedEmail ?? null);
+    }
     return this.response('Student updated successfully', this.normalizeStudent(updated));
   }
 

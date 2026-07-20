@@ -18,3 +18,5 @@ backend:
     description: "List Filtering and Pagination Queries: Define complex array query parameters as `@Query('paramName') paramName?: string | string[]`, normalize them, and use `hasSome` or `in` Prisma filters."
   media-and-uploads:
     description: "Media and Uploads: Serve static assets via app.useStaticAssets(join(process.cwd(), 'public')), handle file uploads using Multer, and store url/placeholder strings directly on Prisma entities for 1-to-1 images."
+  queued-side-effects:
+    description: "Queued Side Effects: Mail, SMS, notifications, webhooks, and similar external work must use BullMQ-backed queue flow and must not block or fail the core business workflow."

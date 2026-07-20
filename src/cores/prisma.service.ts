@@ -6,6 +6,7 @@ import { softDeleteExtension } from '../common/utils/soft-delete.extension';
 
 interface TenantRequest extends Request {
   tenant?: string;
+  academicSessionId?: string;
 }
 
 // Cache for PrismaClient instances
@@ -26,6 +27,17 @@ export class TenantConnectionService implements OnModuleDestroy {
   getTenantSchema(): string {
     const req = this.request as TenantRequest;
     return req.tenant || 'public';
+  }
+
+  /**
+   * Returns the globally selected academic session from the request context.
+   *
+   * Feature services should opt in to this only when their data is session-scoped
+   * (for example students, admissions, exams, timetables, and syllabuses).
+   */
+  getAcademicSessionId(): string | null {
+    const req = this.request as TenantRequest;
+    return req.academicSessionId || null;
   }
 
   /**

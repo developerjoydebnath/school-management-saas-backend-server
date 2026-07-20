@@ -66,6 +66,7 @@ function parseDateFilter(value?: string, endOfDay = false) {
 @Injectable()
 export class SchoolsService {
   private readonly logger = new Logger(SchoolsService.name);
+  private schoolRuntimeColumnsReady = false;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -81,59 +82,66 @@ export class SchoolsService {
    * Super admin reviews later.
    */
   async submitPublicRequest(dto: CreateSchoolRequestDto) {
+    await this.ensureSchoolRuntimeColumns();
     const slug = await this.generateUniqueSlug(dto.schoolName);
+    const schoolShortCode = await this.generateUniqueShortCode(
+      dto.schoolName,
+      slug,
+      dto.schoolShortCode,
+    );
 
     try {
       await this.prisma.school.create({
         data: {
-        schoolName: dto.schoolName,
-        schoolSlug: slug,
-        schoolType: dto.schoolType as SchoolType,
-        divisionId: dto.divisionId,
-        districtId: dto.districtId,
-        upazilaId: dto.upazilaId,
-        postCode: dto.postCode,
-        contactEmail: dto.contactEmail,
-        contactPhone: dto.contactPhone,
-        address: dto.address,
-        latitude: dto.latitude,
-        longitude: dto.longitude,
-        eiin: dto.eiin,
-        registrationNo: dto.registrationNo,
-        isCustomDomainEnabled: !!dto.customDomain,
-        customDomain: dto.customDomain,
-        notes: JSON.stringify({
-          adminName: dto.adminName,
-        }),
-        schoolNameBn: dto.schoolNameBn,
-        alternatePhone: dto.alternatePhone,
-        website: dto.website,
-        mpoStatus: dto.mpoStatus,
-        banbeis: dto.banbeis,
-        establishedYear: dto.establishedYear,
-        governingBodyType: dto.governingBodyType,
-        recognitionStatus: dto.recognitionStatus,
-        recognizedBy: dto.recognizedBy,
-        affiliationBoard: dto.affiliationBoard,
-        affiliationNo: dto.affiliationNo,
-        medium: dto.medium ?? 'bangla',
-        educationLevel: dto.educationLevel ?? [],
-        shift: dto.shift ?? 'day',
-        hasHostel: dto.hasHostel,
-        hasPermanentCampus: dto.hasPermanentCampus,
-        hostelCapacity: dto.hostelCapacity,
-        headTeacherTitle: dto.headTeacherTitle,
-        totalRooms: dto.totalRooms,
-        totalStudentCapacity: dto.totalStudentCapacity,
-        facebookPage: dto.facebookPage,
-        youtubeChannel: dto.youtubeChannel,
-        status: 'pending',
-        createdBy: 'public',
-        logoUrl: dto.logoUrl,
-        logoPlaceholder: dto.logoPlaceholder,
-        bannerUrl: dto.bannerUrl,
-        bannerPlaceholder: dto.bannerPlaceholder,
-      },
+          schoolName: dto.schoolName,
+          schoolSlug: slug,
+          schoolShortCode,
+          schoolType: dto.schoolType as SchoolType,
+          divisionId: dto.divisionId,
+          districtId: dto.districtId,
+          upazilaId: dto.upazilaId,
+          postCode: dto.postCode,
+          contactEmail: dto.contactEmail,
+          contactPhone: dto.contactPhone,
+          address: dto.address,
+          latitude: dto.latitude,
+          longitude: dto.longitude,
+          eiin: dto.eiin,
+          registrationNo: dto.registrationNo,
+          isCustomDomainEnabled: !!dto.customDomain,
+          customDomain: dto.customDomain,
+          notes: JSON.stringify({
+            adminName: dto.adminName,
+          }),
+          schoolNameBn: dto.schoolNameBn,
+          alternatePhone: dto.alternatePhone,
+          website: dto.website,
+          mpoStatus: dto.mpoStatus,
+          banbeis: dto.banbeis,
+          establishedYear: dto.establishedYear,
+          governingBodyType: dto.governingBodyType,
+          recognitionStatus: dto.recognitionStatus,
+          recognizedBy: dto.recognizedBy,
+          affiliationBoard: dto.affiliationBoard,
+          affiliationNo: dto.affiliationNo,
+          medium: dto.medium ?? 'bangla',
+          educationLevel: dto.educationLevel ?? [],
+          shift: dto.shift ?? 'day',
+          hasHostel: dto.hasHostel,
+          hasPermanentCampus: dto.hasPermanentCampus,
+          hostelCapacity: dto.hostelCapacity,
+          headTeacherTitle: dto.headTeacherTitle,
+          totalRooms: dto.totalRooms,
+          totalStudentCapacity: dto.totalStudentCapacity,
+          facebookPage: dto.facebookPage,
+          youtubeChannel: dto.youtubeChannel,
+          status: 'pending',
+          createdBy: 'public',
+          logoUrl: dto.logoUrl,
+          logoPlaceholder: dto.logoPlaceholder,
+          bannerUrl: dto.bannerUrl,
+          bannerPlaceholder: dto.bannerPlaceholder,
+        },
       });
     } catch (error) {
       this.handleSchoolCreateError(error);
@@ -167,62 +175,69 @@ export class SchoolsService {
    * Inserts with status 'active' and immediately runs activation pipeline.
    */
   async createByAdmin(dto: CreateSchoolAdminDto, adminId: string) {
+    await this.ensureSchoolRuntimeColumns();
     const slug = await this.generateUniqueSlug(dto.schoolName);
+    const schoolShortCode = await this.generateUniqueShortCode(
+      dto.schoolName,
+      slug,
+      dto.schoolShortCode,
+    );
 
     // Insert first so we have an ID for the activation pipeline
     let school: School;
     try {
       school = await this.prisma.school.create({
         data: {
-        schoolName: dto.schoolName,
-        schoolSlug: slug,
-        schoolType: dto.schoolType as SchoolType,
-        divisionId: dto.divisionId,
-        districtId: dto.districtId,
-        upazilaId: dto.upazilaId,
-        postCode: dto.postCode,
-        contactEmail: dto.contactEmail,
-        contactPhone: dto.contactPhone,
-        address: dto.address,
-        latitude: dto.latitude,
-        longitude: dto.longitude,
-        eiin: dto.eiin,
-        registrationNo: dto.registrationNo,
-        isCustomDomainEnabled: !!dto.customDomain,
-        customDomain: dto.customDomain,
-        notes: JSON.stringify({
-          adminName: dto.adminName,
-        }),
-        schoolNameBn: dto.schoolNameBn,
-        alternatePhone: dto.alternatePhone,
-        website: dto.website,
-        mpoStatus: dto.mpoStatus,
-        banbeis: dto.banbeis,
-        establishedYear: dto.establishedYear,
-        governingBodyType: dto.governingBodyType,
-        recognitionStatus: dto.recognitionStatus,
-        recognizedBy: dto.recognizedBy,
-        affiliationBoard: dto.affiliationBoard,
-        affiliationNo: dto.affiliationNo,
-        medium: dto.medium ?? 'bangla',
-        educationLevel: dto.educationLevel ?? [],
-        shift: dto.shift ?? 'day',
-        hasHostel: dto.hasHostel,
-        hasPermanentCampus: dto.hasPermanentCampus,
-        hostelCapacity: dto.hostelCapacity,
-        headTeacherTitle: dto.headTeacherTitle,
-        totalRooms: dto.totalRooms,
-        totalStudentCapacity: dto.totalStudentCapacity,
-        facebookPage: dto.facebookPage,
-        youtubeChannel: dto.youtubeChannel,
-        status: 'pending',
-        createdBy: 'superadmin',
-        createdById: adminId,
-        logoUrl: dto.logoUrl,
-        logoPlaceholder: dto.logoPlaceholder,
-        bannerUrl: dto.bannerUrl,
-        bannerPlaceholder: dto.bannerPlaceholder,
-      },
+          schoolName: dto.schoolName,
+          schoolSlug: slug,
+          schoolShortCode,
+          schoolType: dto.schoolType as SchoolType,
+          divisionId: dto.divisionId,
+          districtId: dto.districtId,
+          upazilaId: dto.upazilaId,
+          postCode: dto.postCode,
+          contactEmail: dto.contactEmail,
+          contactPhone: dto.contactPhone,
+          address: dto.address,
+          latitude: dto.latitude,
+          longitude: dto.longitude,
+          eiin: dto.eiin,
+          registrationNo: dto.registrationNo,
+          isCustomDomainEnabled: !!dto.customDomain,
+          customDomain: dto.customDomain,
+          notes: JSON.stringify({
+            adminName: dto.adminName,
+          }),
+          schoolNameBn: dto.schoolNameBn,
+          alternatePhone: dto.alternatePhone,
+          website: dto.website,
+          mpoStatus: dto.mpoStatus,
+          banbeis: dto.banbeis,
+          establishedYear: dto.establishedYear,
+          governingBodyType: dto.governingBodyType,
+          recognitionStatus: dto.recognitionStatus,
+          recognizedBy: dto.recognizedBy,
+          affiliationBoard: dto.affiliationBoard,
+          affiliationNo: dto.affiliationNo,
+          medium: dto.medium ?? 'bangla',
+          educationLevel: dto.educationLevel ?? [],
+          shift: dto.shift ?? 'day',
+          hasHostel: dto.hasHostel,
+          hasPermanentCampus: dto.hasPermanentCampus,
+          hostelCapacity: dto.hostelCapacity,
+          headTeacherTitle: dto.headTeacherTitle,
+          totalRooms: dto.totalRooms,
+          totalStudentCapacity: dto.totalStudentCapacity,
+          facebookPage: dto.facebookPage,
+          youtubeChannel: dto.youtubeChannel,
+          status: 'pending',
+          createdBy: 'superadmin',
+          createdById: adminId,
+          logoUrl: dto.logoUrl,
+          logoPlaceholder: dto.logoPlaceholder,
+          bannerUrl: dto.bannerUrl,
+          bannerPlaceholder: dto.bannerPlaceholder,
+        },
       });
     } catch (error) {
       this.handleSchoolCreateError(error);
@@ -241,12 +256,18 @@ export class SchoolsService {
    * Generic school update (PATCH).
    */
   async updateSchool(id: string, dto: UpdateSchoolDto) {
+    await this.ensureSchoolRuntimeColumns();
     const school = await this.findOneOrFail(id);
+    const schoolShortCode =
+      dto.schoolShortCode !== undefined
+        ? await this.resolveUpdatedShortCode(school, dto.schoolShortCode)
+        : undefined;
 
     const updated = await this.prisma.school.update({
       where: { id },
       data: {
         ...(dto.schoolName && { schoolName: dto.schoolName }),
+        ...(schoolShortCode !== undefined && { schoolShortCode }),
         ...(dto.schoolNameBn !== undefined && {
           schoolNameBn: dto.schoolNameBn,
         }),
@@ -517,6 +538,8 @@ export class SchoolsService {
   // ─── Query methods ────────────────────────────────────────────────────────────
 
   async findAll(query: SchoolListQuery) {
+    await this.ensureSchoolRuntimeColumns();
+
     const page = query.page ?? 1;
     const limit = Math.min(query.limit ?? 20, 100);
     const skip = (page - 1) * limit;
@@ -544,8 +567,10 @@ export class SchoolsService {
     if (schoolTypes.length === 1) where.schoolType = schoolTypes[0];
     if (schoolTypes.length > 1) where.schoolType = { in: schoolTypes };
     const affiliationBoards = parseCsv(query.affiliationBoard);
-    if (affiliationBoards.length === 1) where.affiliationBoard = affiliationBoards[0];
-    if (affiliationBoards.length > 1) where.affiliationBoard = { in: affiliationBoards };
+    if (affiliationBoards.length === 1)
+      where.affiliationBoard = affiliationBoards[0];
+    if (affiliationBoards.length > 1)
+      where.affiliationBoard = { in: affiliationBoards };
     const mediums = parseCsv(query.medium);
     if (mediums.length === 1) where.medium = mediums[0];
     if (mediums.length > 1) where.medium = { in: mediums };
@@ -620,6 +645,8 @@ export class SchoolsService {
   }
 
   async findOne(id: string) {
+    await this.ensureSchoolRuntimeColumns();
+
     const school = await this.prisma.school.findUnique({
       where: { id },
       include: {
@@ -696,6 +723,8 @@ export class SchoolsService {
   // ─── Internal helpers ─────────────────────────────────────────────────────────
 
   private async findOneOrFail(id: string): Promise<School> {
+    await this.ensureSchoolRuntimeColumns();
+
     const school = await this.prisma.school.findUnique({
       where: { id },
     });
@@ -729,13 +758,188 @@ export class SchoolsService {
     }
   }
 
+  private async ensureSchoolRuntimeColumns() {
+    if (this.schoolRuntimeColumnsReady) return;
+
+    await this.prisma.$executeRawUnsafe(`
+      ALTER TABLE public.schools
+        ADD COLUMN IF NOT EXISTS school_short_code VARCHAR(10),
+        ADD COLUMN IF NOT EXISTS portal_template_id VARCHAR(40) NOT NULL DEFAULT 'classic',
+        ADD COLUMN IF NOT EXISTS portal_primary_color VARCHAR(20),
+        ADD COLUMN IF NOT EXISTS portal_theme JSONB NOT NULL DEFAULT '{}'::jsonb,
+        ADD COLUMN IF NOT EXISTS portal_sections JSONB NOT NULL DEFAULT '{}'::jsonb,
+        ADD COLUMN IF NOT EXISTS portal_tagline VARCHAR(255),
+        ADD COLUMN IF NOT EXISTS portal_about_text TEXT,
+        ADD COLUMN IF NOT EXISTS portal_is_live BOOLEAN NOT NULL DEFAULT false,
+        ADD COLUMN IF NOT EXISTS portal_published_at TIMESTAMPTZ,
+        ADD COLUMN IF NOT EXISTS portal_version INTEGER NOT NULL DEFAULT 1;
+    `);
+
+    await this.prisma.$executeRawUnsafe(`
+      UPDATE public.schools
+      SET school_short_code = SUBSTRING(
+        COALESCE(
+          NULLIF(UPPER(REGEXP_REPLACE(school_slug, '[^A-Za-z0-9]', '', 'g')), ''),
+          NULLIF(UPPER(REGEXP_REPLACE(school_name, '[^A-Za-z0-9]', '', 'g')), ''),
+          UPPER(REPLACE(id::text, '-', ''))
+        )
+        FROM 1 FOR 10
+      )
+      WHERE school_short_code IS NULL OR school_short_code = '';
+    `);
+
+    await this.prisma.$executeRawUnsafe(`
+      WITH ranked AS (
+        SELECT
+          id,
+          school_short_code,
+          ROW_NUMBER() OVER (PARTITION BY school_short_code ORDER BY created_at, id) AS row_no
+        FROM public.schools
+        WHERE school_short_code IS NOT NULL
+      )
+      UPDATE public.schools AS schools
+      SET school_short_code = SUBSTRING(ranked.school_short_code FROM 1 FOR 6)
+        || LPAD(ranked.row_no::text, 2, '0')
+        || SUBSTRING(REPLACE(ranked.id::text, '-', '') FROM 1 FOR 2)
+      FROM ranked
+      WHERE schools.id = ranked.id
+        AND ranked.row_no > 1;
+    `);
+
+    await this.prisma.$executeRawUnsafe(`
+      ALTER TABLE public.schools
+        ALTER COLUMN school_short_code SET NOT NULL;
+    `);
+
+    await this.prisma.$executeRawUnsafe(`
+      CREATE UNIQUE INDEX IF NOT EXISTS schools_school_short_code_key
+        ON public.schools (school_short_code);
+    `);
+
+    await this.prisma.$executeRawUnsafe(`
+      CREATE INDEX IF NOT EXISTS schools_portal_template_id_idx
+        ON public.schools (portal_template_id);
+    `);
+
+    await this.prisma.$executeRawUnsafe(`
+      CREATE INDEX IF NOT EXISTS schools_portal_is_live_idx
+        ON public.schools (portal_is_live);
+    `);
+
+    this.schoolRuntimeColumnsReady = true;
+  }
+
+  private normalizeShortCode(value?: string | null) {
+    return (value || '')
+      .toUpperCase()
+      .replace(/[^A-Z0-9]/g, '')
+      .substring(0, 10);
+  }
+
+  private buildShortCodeSeed(schoolName: string, slug?: string) {
+    const cleaned = this.normalizeShortCode(slug || schoolName);
+
+    return cleaned || 'SCHOOL';
+  }
+
+  private async generateUniqueShortCode(
+    schoolName: string,
+    slug?: string,
+    requestedCode?: string | null,
+  ) {
+    const preferredCode = this.normalizeShortCode(requestedCode);
+
+    if (preferredCode) {
+      if (preferredCode.length < 2) {
+        throw new BadRequestException(
+          'School short code must be at least 2 letters or numbers.',
+        );
+      }
+
+      const exists = await this.prisma.school.findFirst({
+        where: { schoolShortCode: preferredCode },
+        select: { id: true },
+      });
+
+      if (exists) {
+        throw new ConflictException(
+          'A school already exists with this short code.',
+        );
+      }
+
+      return preferredCode;
+    }
+
+    const base = this.buildShortCodeSeed(schoolName, slug);
+
+    for (let counter = 0; counter < 100; counter++) {
+      const suffix = counter === 0 ? '' : String(counter + 1);
+      const code = suffix
+        ? `${base.substring(0, 10 - suffix.length)}${suffix}`
+        : base;
+
+      const exists = await this.prisma.school.findFirst({
+        where: { schoolShortCode: code },
+        select: { id: true },
+      });
+
+      if (!exists) return code;
+    }
+
+    return `${base.substring(0, 6)}${Date.now().toString(36).toUpperCase().slice(-4)}`;
+  }
+
+  private async resolveUpdatedShortCode(
+    school: School,
+    requestedCode: string | null,
+  ) {
+    const code = this.normalizeShortCode(requestedCode);
+
+    if (code.length < 2) {
+      throw new BadRequestException(
+        'School short code must be at least 2 letters or numbers.',
+      );
+    }
+
+    if (code === school.schoolShortCode) return code;
+
+    const duplicate = await this.prisma.school.findFirst({
+      where: {
+        schoolShortCode: code,
+        NOT: { id: school.id },
+      },
+      select: { id: true },
+    });
+
+    if (duplicate) {
+      throw new ConflictException(
+        'A school already exists with this short code.',
+      );
+    }
+
+    const schemaName = this.migrationService.toSchemaName(school.schoolSlug);
+    const userCount = await this.prisma.user.count({
+      where: { schemaName },
+    });
+
+    if (userCount > 0) {
+      throw new ConflictException(
+        'School short code cannot be changed after users have been created for this school.',
+      );
+    }
+
+    return code;
+  }
+
   private handleSchoolCreateError(error: unknown): never {
     if (error instanceof Prisma.PrismaClientKnownRequestError) {
       if (error.code === 'P2002') {
         const target = Array.isArray(error.meta?.target)
           ? error.meta.target.join(', ')
           : 'unique field';
-        throw new ConflictException(`A school already exists with this ${target}.`);
+        throw new ConflictException(
+          `A school already exists with this ${target}.`,
+        );
       }
 
       if (error.code === 'P2003') {

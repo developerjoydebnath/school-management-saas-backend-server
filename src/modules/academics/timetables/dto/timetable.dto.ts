@@ -42,7 +42,7 @@ export class SaveTimetableDto {
 
   @IsOptional()
   @IsArray()
-  @IsUUID('4', { each: true })
+  @IsUUID(undefined, { each: true })
   sectionIds?: string[];
 
   @IsOptional()

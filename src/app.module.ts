@@ -7,6 +7,8 @@ import { TenantMiddleware } from './cores/user-context/tenant.middleware';
 import { MediaModule } from './media/media.module';
 import { ClassRoomsModule } from './modules/academics/class-rooms/class-rooms.module';
 import { ClassesModule } from './modules/academics/classes/classes.module';
+import { SectionsModule } from './modules/academics/sections/sections.module';
+import { SessionClassSectionsModule } from './modules/academics/session-class-sections/session-class-sections.module';
 import { SessionsModule } from './modules/academics/sessions/sessions.module';
 import { ShiftsModule } from './modules/academics/shifts/shifts.module';
 import { SubjectsModule } from './modules/academics/subjects/subjects.module';
@@ -20,15 +22,21 @@ import { InventoryModule } from './modules/inventory/inventory.module';
 import { LocationsModule } from './modules/locations/locations.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { PermissionsModule } from './modules/permissions/permissions.module';
+import { PublicPortalModule } from './modules/public-portal/public-portal.module';
 import { RolesModule } from './modules/roles/roles.module';
 import { SchoolBankAccountsModule } from './modules/school-bank-accounts/school-bank-accounts.module';
 import { SchoolSubscriptionDiscountsModule } from './modules/school-subscription-discounts/school-subscription-discounts.module';
 import { SchoolSubscriptionsModule } from './modules/school-subscriptions/school-subscriptions.module';
 import { SchoolsModule } from './modules/schools/schools.module';
+import { MailSettingsModule } from './modules/settings/mail-settings/mail-settings.module';
+import { PaymentMethodSettingsModule } from './modules/settings/payment-methods/payment-method-settings.module';
+import { SchoolMailModule } from './modules/settings/school-mail/school-mail.module';
+import { SoftwareMailModule } from './modules/settings/software-mail/software-mail.module';
 import { SubscriptionPlansModule } from './modules/subscription-plans/subscription-plans.module';
 import { DepartmentsModule } from './modules/staff/departments/departments.module';
 import { DesignationsModule } from './modules/staff/designations/designations.module';
 import { TeachersModule } from './modules/staff/teachers/teachers.module';
+import { StudentPaymentsModule } from './modules/student-payments/student-payments.module';
 import { StudentsModule } from './modules/students/students.module';
 import { VouchersModule } from './modules/vouchers/vouchers.module';
 
@@ -38,10 +46,13 @@ import { VouchersModule } from './modules/vouchers/vouchers.module';
     AuthModule,
     ApiKeyModule,
     AdmissionModule,
+    StudentPaymentsModule,
     StudentsModule,
     SessionsModule,
     ClassRoomsModule,
     ClassesModule,
+    SectionsModule,
+    SessionClassSectionsModule,
     SubjectsModule,
     ExamsModule,
     ExamRoutinesModule,
@@ -56,9 +67,14 @@ import { VouchersModule } from './modules/vouchers/vouchers.module';
     SchoolSubscriptionsModule,
     SchoolSubscriptionDiscountsModule,
     SubscriptionPlansModule,
+    MailSettingsModule,
+    SchoolMailModule,
+    SoftwareMailModule,
+    PaymentMethodSettingsModule,
     VouchersModule,
     LocationsModule,
     PaymentsModule,
+    PublicPortalModule,
     ScheduleModule.forRoot(),
     MediaModule,
     DesignationsModule,

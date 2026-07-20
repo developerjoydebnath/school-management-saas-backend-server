@@ -35,6 +35,56 @@ await this.prismaService.user.update({ data: { refreshToken } });
 
 When designing Prisma schemas for multi-tenancy, authentication credentials (`User`) must reside in the global `public` schema, while school-specific details (`UserProfile`) must reside in the tenant's isolated schema. Additionally, timestamps must use `@db.Timestamptz`.
 
+## Academic Session Request Context
+
+The frontend sends the globally selected academic session as `x-academic-session-id` on proxied API requests. Backend services can read it from `TenantConnectionService.getAcademicSessionId()`.
+
+Rules:
+
+1. Use this session context only in session-scoped domains such as students, admissions, exams, syllabuses, timetables, attendance, fees, and class promotion.
+2. Ignore it in non-session-scoped domains such as staff/teachers, inventory catalogs, permissions, roles, schools, and static setup data unless a workflow explicitly requires a session.
+3. If a controller accepts an explicit `sessionId`, `sessionIds`, or equivalent query/body value, that explicit value always overrides the global header session for that operation.
+4. Session filters may be multi-select. Parse comma-separated values before applying them to Prisma filters.
+5. When no explicit session filter is provided, use `TenantConnectionService.getAcademicSessionId()` as the default session scope.
+6. When neither explicit filter nor header context exists, fall back to the current/active academic session only for modules that require a session scope.
+7. Do not add broad session filters blindly. Validate whether the model actually owns `sessionId` or whether the relationship should be traversed through another model.
+
+Recommended resolver shape:
+
+```typescript
+const filterSessionIds = parseMultiValue(query.sessionId ?? query.sessionIds);
+const headerSessionId = this.tenantConnection.getAcademicSessionId();
+const effectiveSessionIds = filterSessionIds.length
+  ? filterSessionIds
+  : headerSessionId
+    ? [headerSessionId]
+    : [await this.getCurrentActiveSessionId()];
+```
+
+**Why:** Academic session is global UX context, but not every tenant table is session-owned. Keeping it request-scoped and opt-in prevents accidental data hiding while making student/admission/academic screens default to the selected session.
+
+## Session-Specific Section Availability
+
+Keep `Class` and `Section` as master setup data. When section availability differs by academic session, do not mutate the master `Class` or `Section` records. Use a session mapping table such as `SessionClassSection` with:
+
+- `sessionId`
+- `classId`
+- nullable `sectionId`
+- optional `capacity`, `shiftId`, `roomId`, and `status`
+
+Resolution rules:
+
+1. If a request passes an explicit `sessionId`, resolve class sections for that session.
+2. Else use `TenantConnectionService.getAcademicSessionId()`.
+3. Else fall back to the current/active academic session where the workflow requires session context.
+4. If mappings exist for a `(sessionId, classId)`, return only mapped non-null sections.
+5. If mappings exist and all have `sectionId = null`, the class has no sections for that session.
+6. If no mappings exist, fall back to active master sections for backward compatibility.
+
+Option/list APIs used by forms should expose a dedicated section endpoint such as `/classes/sections/active-list?classId=...&sessionId=...`, returning only `{ label, value }` plus minimal metadata. Do not force consumers to infer session-specific sections from `/classes/active-list`.
+
+**Why:** A school may run Class 1 with sections A/B in one academic session and no sections in the next. Session-aware mappings preserve history and prevent invalid admissions, student lists, timetables, and syllabuses.
+
 ## UUID v7 Primary Key Standard
 
 All new Prisma models must use PostgreSQL 18 native UUID v7 defaults for primary keys:
@@ -134,6 +184,21 @@ node -e "const {PrismaClient}=require('@prisma/client'); const p=new PrismaClien
 ```
 
 For PostgreSQL 18 UUID v7 work, confirm the database supports `uuidv7()` before applying migrations that depend on it.
+
+## Payment Method Configuration
+
+School payment methods are tenant-owned settings because each school can use different bank accounts, mobile banking numbers, gateways, modes, and credentials.
+
+- Store payment method config in the tenant schema.
+- New payment method setting IDs use `uuidv7()`.
+- Guard admin APIs with role and permission guards.
+- Public or form option APIs must expose only active `{ label, value }` style options.
+- Never return gateway credentials, app secrets, passwords, store passwords, or private keys from option APIs or public portal config.
+- Protected admin list/details APIs may return credential data only to users with payment-method settings permissions.
+- If the table may not exist yet for older tenants, add an idempotent table creation/migration path before querying to avoid the recurring new-module 500 error.
+- Payment records store the selected provider value, not the secret config payload. Resolve display labels from settings when needed.
+
+**Why:** Bangladesh school payments commonly mix cash, bank transfer, bKash, Nagad, Rocket, and SSLCommerz. The provider list is bounded, but each school's credentials and enabled channels are independent.
 
 ## Multi-Identifier Login
 

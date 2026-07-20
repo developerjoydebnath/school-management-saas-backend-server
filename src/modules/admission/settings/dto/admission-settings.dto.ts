@@ -64,6 +64,10 @@ export class UpsertAdmissionSettingsDto {
   @IsOptional()
   discountMaxAmount?: number;
 
+  @IsIn(['stack_all', 'best_only'])
+  @IsOptional()
+  discountStackingMode?: string;
+
   @IsBoolean()
   @IsOptional()
   manualDiscountEnabled?: boolean;

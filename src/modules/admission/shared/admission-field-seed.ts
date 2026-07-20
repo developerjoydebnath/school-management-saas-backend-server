@@ -75,6 +75,7 @@ export const ADMISSION_SYSTEM_FIELDS: AdmissionFieldSeed[] = [
     ],
   }),
   field(80, 'student_info', 'nationality', 'Nationality', 'text', 'e.g. Bangladeshi'),
+  field(85, 'student_info', 'email', 'Student Email', 'email', 'Enter student email address'),
   field(90, 'student_info', 'specialQuota', 'Special Quota', 'select', 'Select quota', {
     options: [
       option('None', 'none'),
@@ -190,14 +191,7 @@ export const ADMISSION_SYSTEM_FIELDS: AdmissionFieldSeed[] = [
     ],
   }),
   field(1230, 'payment', 'paymentMethod', 'Payment Method', 'select', 'Select payment method', {
-    options: [
-      option('Cash', 'cash'),
-      option('Bank', 'bank'),
-      option('Bkash', 'bkash'),
-      option('Nagad', 'nagad'),
-      option('Rocket', 'rocket'),
-      option('Card', 'card'),
-    ],
+    options: { source: 'payment_methods' },
   }),
   field(1240, 'payment', 'transactionId', 'Transaction ID', 'text', 'Enter transaction ID'),
   field(1250, 'payment', 'paidAt', 'Paid At', 'date', 'Select payment date'),
