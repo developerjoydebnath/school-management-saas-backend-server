@@ -11,6 +11,7 @@ import {
   TenantConnectionService,
 } from 'src/cores/prisma.service';
 import { MailQueueService } from 'src/modules/mail-queue/mail-queue.service';
+import { PaymentMethodSettingsService } from 'src/modules/settings/payment-methods/payment-method-settings.service';
 import { StudentPaymentsService } from 'src/modules/student-payments/student-payments.service';
 import { UsernamesService } from 'src/modules/usernames/usernames.service';
 import { AdmissionSettingsService } from '../settings/admission-settings.service';
@@ -31,9 +32,16 @@ export class AdmissionApplicationsService {
     private studentPaymentsService: StudentPaymentsService,
     private mailQueueService: MailQueueService,
     private usernamesService: UsernamesService,
+    private paymentMethodSettingsService: PaymentMethodSettingsService,
   ) {}
 
   private prisma() {
+    const requestSchema = this.tenantConnection.getTenantSchema();
+    if (requestSchema === 'public') {
+      return this.tenantConnection.getTenantClientForSchema(
+        this.usernamesService.resolveEffectiveSchemaName(requestSchema),
+      );
+    }
     return this.tenantConnection.getTenantClient();
   }
 
@@ -173,6 +181,50 @@ export class AdmissionApplicationsService {
     });
   }
 
+  private async queuePaymentReceivedEmail(application: any, payment: any) {
+    const to = this.recipientEmail(application);
+    if (!to) {
+      return {
+        queued: false,
+        skipped: true,
+        reason: 'Recipient email is missing',
+      };
+    }
+
+    const paidAmount = this.toMoney(payment?.paidAmount ?? application?.admissionFeeAmount) ?? 0;
+    const payableAmount = this.toMoney(application?.admissionPayableAmount) ?? 0;
+    const dueAmount = Math.max(payableAmount - paidAmount, 0);
+    return this.mailQueueService.enqueue({
+      to,
+      subject: `Admission payment received: ${application.applicationNo}`,
+      text: [
+        `Dear ${application.studentNameEn || 'Applicant'},`,
+        '',
+        'Your admission payment has been recorded successfully.',
+        `Application No: ${application.applicationNo}`,
+        `Paid Amount: BDT ${paidAmount}`,
+        `Due Amount: BDT ${dueAmount}`,
+        `Payment Method: ${application.paymentMethod || '-'}`,
+        payment?.transactionId ? `Transaction ID: ${payment.transactionId}` : '',
+        '',
+        'The school administration will review the payment and complete admission approval.',
+      ]
+        .filter(Boolean)
+        .join('\n'),
+      html: `
+        <p>Dear ${application.studentNameEn || 'Applicant'},</p>
+        <p>Your admission payment has been recorded successfully.</p>
+        <p><strong>Application No:</strong> ${application.applicationNo}</p>
+        <p><strong>Paid Amount:</strong> BDT ${paidAmount}<br/>
+        <strong>Due Amount:</strong> BDT ${dueAmount}<br/>
+        <strong>Payment Method:</strong> ${application.paymentMethod || '-'}</p>
+        ${payment?.transactionId ? `<p><strong>Transaction ID:</strong> ${payment.transactionId}</p>` : ''}
+        <p>The school administration will review the payment and complete admission approval.</p>
+      `,
+      schema: this.tenantConnection.getTenantSchema(),
+    });
+  }
+
   private async queueApprovalEmail(
     application: any,
     credentials: {
@@ -306,6 +358,15 @@ export class AdmissionApplicationsService {
     );
   }
 
+  private optionalUuid(value: any, fieldName: string) {
+    const text = this.optionalText(value);
+    if (!text) return null;
+    if (!this.isUuid(text)) {
+      throw new BadRequestException(`${fieldName} must be a valid UUID`);
+    }
+    return text;
+  }
+
   private validateBangladeshMobile(value: any, fieldName: string, required = false) {
     const mobile = String(value || '').trim();
     if (!mobile) {
@@ -344,7 +405,9 @@ export class AdmissionApplicationsService {
       throw new BadRequestException('Father mobile is required for parent account');
     }
     const fatherMobile = validatedFatherMobile;
-    const schemaName = this.tenantConnection.getTenantSchema();
+    const schemaName = this.usernamesService.resolveEffectiveSchemaName(
+      this.tenantConnection.getTenantSchema(),
+    );
     const publicClient = this.prismaService.client;
     const existingUser = await publicClient.user.findFirst({
       where: {
@@ -1051,6 +1114,124 @@ export class AdmissionApplicationsService {
     };
   }
 
+  private chartRange(period?: string, from?: string, to?: string) {
+    const now = new Date();
+    const end = to ? new Date(to) : now;
+    const start = from ? new Date(from) : new Date(now);
+    const normalizedPeriod = ['weekly', 'monthly', 'yearly', 'custom'].includes(
+      String(period || ''),
+    )
+      ? String(period)
+      : 'monthly';
+
+    if (!from) {
+      if (normalizedPeriod === 'weekly') start.setDate(now.getDate() - 6);
+      else if (normalizedPeriod === 'yearly') start.setMonth(now.getMonth() - 11);
+      else start.setDate(now.getDate() - 29);
+    }
+
+    start.setHours(0, 0, 0, 0);
+    end.setHours(23, 59, 59, 999);
+    return { start, end, period: normalizedPeriod };
+  }
+
+  private dateKey(date: Date, period: string) {
+    if (period === 'yearly') {
+      return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+    }
+    return date.toISOString().slice(0, 10);
+  }
+
+  private trendLabel(key: string, period: string) {
+    if (period === 'yearly') {
+      const [year, month] = key.split('-').map(Number);
+      return new Date(year, month - 1, 1).toLocaleDateString('en-US', {
+        month: 'short',
+        year: '2-digit',
+      });
+    }
+    return new Date(key).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+    });
+  }
+
+  private async applicationSummary(where: any, query: any) {
+    const prisma = this.prisma();
+    const { start, end, period } = this.chartRange(
+      query.chartPeriod,
+      query.chartFrom,
+      query.chartTo,
+    );
+    const chartWhere = {
+      ...where,
+      createdAt: {
+        ...(where.createdAt || {}),
+        gte: start,
+        lte: end,
+      },
+    };
+
+    const [statusRows, paymentRows, paidNotActivated, trendItems] = await Promise.all([
+      prisma.admissionApplication.groupBy({
+        by: ['status'],
+        where,
+        _count: { _all: true },
+      }),
+      prisma.admissionApplication.groupBy({
+        by: ['paymentStatus'],
+        where,
+        _count: { _all: true },
+      }),
+      prisma.admissionApplication.count({
+        where: {
+          ...where,
+          paymentStatus: 'paid',
+          status: { not: 'approved' },
+        },
+      }),
+      prisma.admissionApplication.findMany({
+        where: chartWhere,
+        select: { createdAt: true },
+        orderBy: { createdAt: 'asc' },
+      }),
+    ]);
+
+    const statusBreakdown = statusRows.reduce((acc, row) => {
+      acc[row.status || 'pending'] = row._count._all;
+      return acc;
+    }, {} as Record<string, number>);
+    const paymentBreakdown = paymentRows.reduce((acc, row) => {
+      acc[row.paymentStatus || 'pending'] = row._count._all;
+      return acc;
+    }, {} as Record<string, number>);
+    const trendMap = new Map<string, number>();
+    for (const item of trendItems) {
+      const key = this.dateKey(item.createdAt, period);
+      trendMap.set(key, (trendMap.get(key) || 0) + 1);
+    }
+    const trend = Array.from(trendMap.entries()).map(([key, count]) => ({
+      label: this.trendLabel(key, period),
+      count,
+    }));
+
+    return {
+      statusBreakdown,
+      paymentBreakdown,
+      approved: statusBreakdown.approved || 0,
+      pending: statusBreakdown.pending || 0,
+      underReview: statusBreakdown.under_review || 0,
+      eligibleForPayment: statusBreakdown.eligible_for_payment || 0,
+      rejected: statusBreakdown.rejected || 0,
+      waitlisted: statusBreakdown.waitlisted || 0,
+      paid: paymentBreakdown.paid || 0,
+      partial: paymentBreakdown.partial || 0,
+      pendingPayment: paymentBreakdown.pending || paymentBreakdown.unpaid || 0,
+      paidNotActivated,
+      trend,
+    };
+  }
+
   private async validateRequiredFields(application: any) {
     const admissionMode = application.admissionMode || 'fast';
     const settings = await this.prisma().admissionSettings.findFirst({
@@ -1214,7 +1395,7 @@ export class AdmissionApplicationsService {
       };
     }
 
-    const [items, total] = await Promise.all([
+    const [items, total, summary] = await Promise.all([
       prisma.admissionApplication.findMany({
         where,
         include: this.detailsInclude(),
@@ -1223,6 +1404,7 @@ export class AdmissionApplicationsService {
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       }),
       prisma.admissionApplication.count({ where }),
+      this.applicationSummary(where, query),
     ]);
     const fieldsBySession = new Map<string, any[]>();
     for (const item of items) {
@@ -1250,6 +1432,10 @@ export class AdmissionApplicationsService {
         totalPages,
         hasNextPage: page < totalPages,
         hasPreviousPage: page > 1,
+        summary: {
+          total,
+          ...summary,
+        },
       },
     });
   }
@@ -1383,22 +1569,39 @@ export class AdmissionApplicationsService {
 
   async approve(id: string, dto: ApproveAdmissionDto, userId?: string) {
     const prisma = this.prisma();
-    const application = await prisma.admissionApplication.findFirst({
+    let application = await prisma.admissionApplication.findFirst({
       where: { id, deletedAt: null },
     });
     if (!application) throw new NotFoundException('Admission application not found');
     if (application.status === 'approved' || application.studentId) {
       throw new ConflictException('Admission application is already approved');
     }
+
+    const targetSessionId = dto.sessionId || application.sessionId;
+    const targetClassId = dto.classId || application.applyingClassId;
+    const targetSectionId = dto.sectionId ?? application.sectionId;
+
+    if (targetSessionId !== application.sessionId || targetClassId !== application.applyingClassId || targetSectionId !== application.sectionId) {
+      application = await prisma.admissionApplication.update({
+        where: { id },
+        data: {
+          sessionId: targetSessionId,
+          applyingClassId: targetClassId,
+          sectionId: targetSectionId,
+          updatedBy: userId || null,
+        },
+      });
+    }
+
     await this.validateRequiredFields(application);
 
-    const sectionId = dto.sectionId || application.sectionId;
+    const sectionId = targetSectionId;
     const rollNumber = dto.rollNumber?.trim() || null;
     if (rollNumber) {
       const existingRoll = await prisma.student.findFirst({
         where: {
-          currentSessionId: application.sessionId,
-          classId: application.applyingClassId,
+          currentSessionId: targetSessionId,
+          classId: targetClassId,
           sectionId,
           rollNumber,
           status: 'active',
@@ -1410,13 +1613,15 @@ export class AdmissionApplicationsService {
     }
 
     const session = await prisma.academicSession.findUnique({
-      where: { id: application.sessionId },
+      where: { id: targetSessionId },
       select: { year: true },
     });
     if (!session) throw new BadRequestException('Session not found');
 
     const publicClient = this.prismaService.client;
-    const schemaName = this.tenantConnection.getTenantSchema();
+    const schemaName = this.usernamesService.resolveEffectiveSchemaName(
+      this.tenantConnection.getTenantSchema(),
+    );
     const parentAccount = await this.ensureParentAccount(application);
     const applicationCustomData =
       application.customData && typeof application.customData === 'object'
@@ -1495,9 +1700,9 @@ export class AdmissionApplicationsService {
           photoUrl: application.photoUrl,
           photoPlaceholder: application.photoPlaceholder,
           photoMediaId: application.photoMediaId,
-          classId: application.applyingClassId,
+          classId: targetClassId,
           sectionId,
-          currentSessionId: application.sessionId,
+          currentSessionId: targetSessionId,
           rollNumber,
           mediumOrVersion: application.mediumOrVersion,
           shift: application.shift,
@@ -1749,11 +1954,181 @@ export class AdmissionApplicationsService {
     });
   }
 
+  async adminPaymentDetails(id: string, query: any = {}) {
+    const application = await this.prisma().admissionApplication.findFirst({
+      where: { id, deletedAt: null },
+      include: {
+        applyingClass: { select: { id: true, enName: true, bnName: true } },
+        section: { select: { id: true, name: true, bnName: true } },
+      },
+    });
+    if (!application) throw new NotFoundException('Admission application not found');
+    if (application.status === 'approved' || application.studentId) {
+      throw new BadRequestException('Approved applications do not accept admission payments here');
+    }
+
+    const hasSectionQuery = query?.sectionId !== undefined || query?.section !== undefined;
+    const targetSessionId =
+      this.optionalUuid(query?.sessionId, 'Session') || application.sessionId;
+    const targetClassId =
+      this.optionalUuid(query?.classId, 'Class') || application.applyingClassId;
+    const targetSectionId = hasSectionQuery
+      ? this.optionalUuid(query?.sectionId ?? query?.section, 'Section')
+      : application.sectionId;
+
+    const feeResponse = await this.settingsService.calculateFee(
+      targetSessionId,
+      targetClassId,
+      undefined,
+      undefined,
+      typeof application.specialQuota === 'string' ? application.specialQuota : undefined,
+    );
+    const fee = feeResponse.data || {};
+    const paymentMethodsResponse = await this.paymentMethodSettingsService.activeOptions('admin');
+    const paymentMethods = Array.isArray(paymentMethodsResponse?.data)
+      ? paymentMethodsResponse.data
+      : [];
+    const alreadyPaid = this.toMoney(application.admissionFeeAmount) || 0;
+    const payableAmount =
+      this.toMoney(application.admissionPayableAmount) ??
+      this.toMoney(fee.payableAmount) ??
+      this.toMoney(fee.requiredTotal) ??
+      0;
+    const dueAmount = Number(Math.max(payableAmount - alreadyPaid, 0).toFixed(2));
+
+    return this.response('Admission payment details retrieved successfully', {
+      application: {
+        id: application.id,
+        applicationNo: application.applicationNo,
+        studentNameEn: application.studentNameEn,
+        source: application.source,
+        status: application.status,
+        paymentStatus: application.paymentStatus,
+        sessionId: targetSessionId,
+        classId: targetClassId,
+        sectionId: targetSectionId,
+        className: application.applyingClass?.enName || null,
+        sectionName: application.section?.name || null,
+      },
+      fee: {
+        ...fee,
+        payableAmount,
+        alreadyPaid,
+        dueAmount,
+      },
+      paymentMethods,
+    });
+  }
+
+  async recordAdminPayment(id: string, dto: any, userId?: string) {
+    const hasSectionInput = dto.sectionId !== undefined || dto.section !== undefined;
+    const targetSessionId = this.optionalUuid(dto.sessionId, 'Session');
+    const targetClassId = this.optionalUuid(dto.classId, 'Class');
+    const targetSectionId = hasSectionInput
+      ? this.optionalUuid(dto.sectionId ?? dto.section, 'Section')
+      : undefined;
+
+    const detailsResponse = await this.adminPaymentDetails(id, {
+      sessionId: targetSessionId,
+      classId: targetClassId,
+      sectionId: hasSectionInput ? targetSectionId : undefined,
+    });
+    const details = detailsResponse.data;
+    const methodValue = dto.paymentMethod || dto.provider || dto.method;
+    const method = (details.paymentMethods || []).find(
+      (item: any) =>
+        item.value === methodValue ||
+        item.provider === methodValue ||
+        item.id === methodValue,
+    );
+    if (!method) throw new BadRequestException('Select an active payment method');
+
+    const amount = this.toMoney(dto.amount || dto.paidAmount || details.fee.dueAmount) || 0;
+    const dueBeforePayment = this.toMoney(details.fee.dueAmount) || 0;
+    if (amount <= 0) throw new BadRequestException('Payment amount must be greater than zero');
+    if (amount > dueBeforePayment) {
+      throw new BadRequestException('Payment amount cannot be greater than payable due');
+    }
+
+    const paidAt = this.toDate(dto.paidAt) || new Date();
+    const paymentMethod = method.value || method.provider || method.id;
+    const updated = await this.prisma().$transaction(async (tx) => {
+      const current = await tx.admissionApplication.findFirst({
+        where: { id, deletedAt: null },
+      });
+      if (!current) throw new NotFoundException('Admission application not found');
+      if (current.status === 'approved' || current.studentId) {
+        throw new ConflictException('Admission application is already approved');
+      }
+
+      const previousPaid = this.toMoney(current.admissionFeeAmount) || 0;
+      const payableAmount = this.toMoney(details.fee.payableAmount) || dueBeforePayment;
+      const nextPaid = Number((previousPaid + amount).toFixed(2));
+      const nextDue = Number(Math.max(payableAmount - nextPaid, 0).toFixed(2));
+      const paymentStatus = nextDue > 0 ? 'partial' : 'paid';
+
+      const application = await tx.admissionApplication.update({
+        where: { id },
+        data: {
+          sessionId: targetSessionId || current.sessionId,
+          applyingClassId: targetClassId || current.applyingClassId,
+          sectionId: hasSectionInput ? targetSectionId : current.sectionId,
+          admissionFeeSubtotal: details.fee.subtotal ?? details.fee.requiredTotal,
+          admissionDiscountAmount: details.fee.discountAmount ?? 0,
+          admissionPayableAmount: payableAmount,
+          admissionFeeAmount: nextPaid,
+          paymentStatus,
+          paymentMethod,
+          transactionId: dto.transactionId || current.transactionId || null,
+          paidAt,
+          updatedBy: userId || null,
+          customData: {
+            ...(current.customData && typeof current.customData === 'object'
+              ? current.customData
+              : {}),
+            admissionDueAmount: nextDue,
+            admissionPaidAmount: nextPaid,
+            latestPaymentNote: dto.note || null,
+          },
+        },
+        include: this.detailsInclude(),
+      });
+
+      await this.studentPaymentsService.recordAdmissionPayment(
+        tx,
+        {
+          ...application,
+          paymentGateway: 'manual',
+          gatewayProvider: method.provider || method.value || paymentMethod,
+        },
+        userId,
+        amount,
+      );
+      return application;
+    });
+
+    void this.queuePaymentReceivedEmail(updated, {
+      paidAmount: updated.admissionFeeAmount,
+      transactionId: updated.transactionId,
+    }).catch(() => undefined);
+
+    return this.response('Admission payment recorded successfully', {
+      id: updated.id,
+      applicationNo: updated.applicationNo,
+      paymentStatus: updated.paymentStatus,
+      paidAmount: updated.admissionFeeAmount,
+      payableAmount: updated.admissionPayableAmount,
+    });
+  }
+
   async rolls(query: any = {}) {
+    const sessionId = this.optionalUuid(query.sessionId, 'Session');
+    const classId = this.optionalUuid(query.classId, 'Class');
+    const sectionId = this.optionalUuid(query.sectionId, 'Section');
     const where: any = { deletedAt: null };
-    if (query.sessionId) where.currentSessionId = query.sessionId;
-    if (query.classId) where.classId = query.classId;
-    if (query.sectionId) where.sectionId = query.sectionId;
+    if (sessionId) where.currentSessionId = sessionId;
+    if (classId) where.classId = classId;
+    if (sectionId) where.sectionId = sectionId;
     const items = await this.prisma().student.findMany({
       where,
       select: { id: true, studentIdNo: true, fullNameEn: true, rollNumber: true },

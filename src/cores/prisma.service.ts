@@ -46,7 +46,16 @@ export class TenantConnectionService implements OnModuleDestroy {
   getTenantClient(): PrismaClient {
     const req = this.request as TenantRequest;
     const tenantSchema = req.tenant || 'public';
+    return this.getTenantClientForSchema(tenantSchema);
+  }
 
+  /**
+   * Retrieves or creates a cached PrismaClient for an explicit tenant schema.
+   * Useful for platform-admin flows that intentionally operate against the
+   * development/default tenant schema while the request itself is public.
+   */
+  getTenantClientForSchema(schemaName: string): PrismaClient {
+    const tenantSchema = String(schemaName || '').trim() || 'public';
     if (!prismaClients[tenantSchema]) {
       // Build the dynamic URL with the schema query param
       const dbUrl = new URL(

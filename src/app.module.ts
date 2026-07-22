@@ -21,6 +21,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
 import { LocationsModule } from './modules/locations/locations.module';
 import { PaymentsModule } from './modules/payments/payments.module';
+import { ParentsModule } from './modules/parents/parents.module';
 import { PermissionsModule } from './modules/permissions/permissions.module';
 import { PublicPortalModule } from './modules/public-portal/public-portal.module';
 import { RolesModule } from './modules/roles/roles.module';
@@ -74,6 +75,7 @@ import { VouchersModule } from './modules/vouchers/vouchers.module';
     VouchersModule,
     LocationsModule,
     PaymentsModule,
+    ParentsModule,
     PublicPortalModule,
     ScheduleModule.forRoot(),
     MediaModule,

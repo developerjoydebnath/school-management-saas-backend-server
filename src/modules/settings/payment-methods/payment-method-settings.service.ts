@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { TenantConnectionService } from 'src/cores/prisma.service';
 import {
   CreatePaymentMethodSettingDto,
+  UpdatePaymentMethodAvailabilityDto,
   UpdatePaymentMethodSettingDto,
 } from './dto/payment-method-setting.dto';
 import {
@@ -29,6 +30,7 @@ const SSLCOMMERZ_CALLBACK_PATHS = {
 } as const;
 
 type SslCommerzCallbackKey = keyof typeof SSLCOMMERZ_CALLBACK_PATHS;
+type PaymentMethodUsage = 'admin' | 'public' | 'all' | undefined;
 
 @Injectable()
 export class PaymentMethodSettingsService {
@@ -144,6 +146,8 @@ export class PaymentMethodSettingsService {
         description TEXT,
         mode VARCHAR(20) NOT NULL DEFAULT 'sandbox',
         status VARCHAR(20) NOT NULL DEFAULT 'INACTIVE',
+        admin_enabled BOOLEAN NOT NULL DEFAULT true,
+        public_enabled BOOLEAN NOT NULL DEFAULT false,
         is_default BOOLEAN NOT NULL DEFAULT false,
         sort_order INTEGER NOT NULL DEFAULT 0,
         currency VARCHAR(10) NOT NULL DEFAULT 'BDT',
@@ -165,6 +169,18 @@ export class PaymentMethodSettingsService {
       `CREATE INDEX IF NOT EXISTS payment_method_settings_status_idx ON "${schema}"."payment_method_settings"(status)`,
     );
     await client.$executeRawUnsafe(
+      `ALTER TABLE "${schema}"."payment_method_settings" ADD COLUMN IF NOT EXISTS admin_enabled BOOLEAN NOT NULL DEFAULT true`,
+    );
+    await client.$executeRawUnsafe(
+      `ALTER TABLE "${schema}"."payment_method_settings" ADD COLUMN IF NOT EXISTS public_enabled BOOLEAN NOT NULL DEFAULT false`,
+    );
+    await client.$executeRawUnsafe(
+      `UPDATE "${schema}"."payment_method_settings" SET public_enabled = true WHERE status = 'ACTIVE' AND provider <> 'cash' AND deleted_at IS NULL AND public_enabled = false`,
+    );
+    await client.$executeRawUnsafe(
+      `UPDATE "${schema}"."payment_method_settings" SET public_enabled = false WHERE provider = 'cash' AND deleted_at IS NULL`,
+    );
+    await client.$executeRawUnsafe(
       `CREATE INDEX IF NOT EXISTS payment_method_settings_deleted_at_idx ON "${schema}"."payment_method_settings"(deleted_at)`,
     );
   }
@@ -180,6 +196,8 @@ export class PaymentMethodSettingsService {
       description: item.description,
       mode: item.mode,
       status: item.status,
+      adminEnabled: item.adminEnabled !== false,
+      publicEnabled: !!item.publicEnabled,
       isDefault: !!item.isDefault,
       sortOrder: Number(item.sortOrder || 0),
       currency: item.currency,
@@ -199,6 +217,8 @@ export class PaymentMethodSettingsService {
       description,
       mode,
       status,
+      admin_enabled AS "adminEnabled",
+      public_enabled AS "publicEnabled",
       is_default AS "isDefault",
       sort_order AS "sortOrder",
       currency,
@@ -229,6 +249,8 @@ export class PaymentMethodSettingsService {
           description,
           mode,
           status,
+          admin_enabled,
+          public_enabled,
           is_default,
           sort_order,
           currency,
@@ -241,6 +263,8 @@ export class PaymentMethodSettingsService {
           ${template.description},
           ${template.defaultMode},
           ${status},
+          ${true},
+          ${false},
           ${isDefault},
           ${index},
           ${'BDT'},
@@ -305,7 +329,13 @@ export class PaymentMethodSettingsService {
     });
   }
 
-  async activeOptions() {
+  private usageClause(usage?: PaymentMethodUsage) {
+    if (usage === 'admin') return Prisma.sql`AND admin_enabled = true`;
+    if (usage === 'public') return Prisma.sql`AND public_enabled = true`;
+    return Prisma.empty;
+  }
+
+  async activeOptions(usage?: PaymentMethodUsage) {
     await this.ensureTable();
     await this.seedDefaults();
 
@@ -313,6 +343,7 @@ export class PaymentMethodSettingsService {
       SELECT ${this.rowSelect()}
       FROM ${this.table('payment_method_settings')}
       WHERE deleted_at IS NULL AND status = 'ACTIVE'
+        ${this.usageClause(usage)}
       ORDER BY is_default DESC, sort_order ASC, display_name ASC
     `;
 
@@ -330,7 +361,7 @@ export class PaymentMethodSettingsService {
     );
   }
 
-  async findActiveByProvider(provider: string) {
+  async findActiveByProvider(provider: string, usage?: PaymentMethodUsage) {
     await this.ensureTable();
     await this.seedDefaults();
 
@@ -339,6 +370,7 @@ export class PaymentMethodSettingsService {
       FROM ${this.table('payment_method_settings')}
       WHERE provider = ${provider}
         AND status = 'ACTIVE'
+        ${this.usageClause(usage)}
         AND deleted_at IS NULL
       ORDER BY is_default DESC, sort_order ASC, created_at DESC
       LIMIT 1
@@ -395,6 +427,8 @@ export class PaymentMethodSettingsService {
         description,
         mode,
         status,
+        admin_enabled,
+        public_enabled,
         is_default,
         sort_order,
         currency,
@@ -410,6 +444,8 @@ export class PaymentMethodSettingsService {
         ${dto.description || null},
         ${mode},
         ${status},
+        ${dto.adminEnabled !== false},
+        ${!!dto.publicEnabled},
         ${!!dto.isDefault},
         ${dto.sortOrder || 0},
         ${dto.currency || 'BDT'},
@@ -444,6 +480,8 @@ export class PaymentMethodSettingsService {
         description = ${dto.description || null},
         mode = ${dto.mode || 'manual'},
         status = ${dto.status || 'INACTIVE'},
+        admin_enabled = ${dto.adminEnabled !== false},
+        public_enabled = ${!!dto.publicEnabled},
         is_default = ${!!dto.isDefault},
         sort_order = ${dto.sortOrder || 0},
         currency = ${dto.currency || 'BDT'},
@@ -470,6 +508,26 @@ export class PaymentMethodSettingsService {
     `;
     if (!items[0]) throw new NotFoundException('Payment method not found');
     return this.response('Payment method status updated successfully', this.normalize(items[0]));
+  }
+
+  async updateAvailability(
+    id: string,
+    dto: UpdatePaymentMethodAvailabilityDto,
+    userId?: string,
+  ) {
+    await this.ensureTable();
+    const items = await this.prisma().$queryRaw<any[]>`
+      UPDATE ${this.table('payment_method_settings')}
+      SET
+        admin_enabled = COALESCE(${dto.adminEnabled ?? null}, admin_enabled),
+        public_enabled = COALESCE(${dto.publicEnabled ?? null}, public_enabled),
+        updated_by = CAST(${userId || null} AS uuid),
+        updated_at = now()
+      WHERE id = ${id}::uuid AND deleted_at IS NULL
+      RETURNING ${this.rowSelect()}
+    `;
+    if (!items[0]) throw new NotFoundException('Payment method not found');
+    return this.response('Payment method availability updated successfully', this.normalize(items[0]));
   }
 
   async remove(id: string, userId?: string) {

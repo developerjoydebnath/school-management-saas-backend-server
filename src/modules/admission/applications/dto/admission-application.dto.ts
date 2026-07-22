@@ -193,6 +193,14 @@ export class UpdateAdmissionApplicationDto {
 }
 
 export class ApproveAdmissionDto {
+  @IsUUID()
+  @IsOptional()
+  sessionId?: string;
+
+  @IsUUID()
+  @IsOptional()
+  classId?: string;
+
   @IsString()
   @MaxLength(20)
   @IsOptional()

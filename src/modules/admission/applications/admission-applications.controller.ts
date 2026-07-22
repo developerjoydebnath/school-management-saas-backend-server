@@ -66,6 +66,29 @@ export class AdmissionApplicationsController {
     return this.service.rolls(query);
   }
 
+  @Get(':id/payment-details')
+  @ApiOperation({ summary: 'Get protected admission payment details' })
+  @RequirePermissions(
+    PERMISSIONS.ADMISSION.APPLICATIONS.VIEW,
+    PERMISSIONS.ADMISSION.APPLICATIONS.ALL,
+    PERMISSIONS.ADMISSION.ALL,
+  )
+  adminPaymentDetails(@Param('id') id: string, @Query() query: any) {
+    return this.service.adminPaymentDetails(id, query);
+  }
+
+  @Post(':id/payment')
+  @ApiOperation({ summary: 'Record protected admission payment' })
+  @RequirePermissions(
+    PERMISSIONS.ADMISSION.APPLICATIONS.EDIT,
+    PERMISSIONS.ADMISSION.APPLICATIONS.APPROVE,
+    PERMISSIONS.ADMISSION.APPLICATIONS.ALL,
+    PERMISSIONS.ADMISSION.ALL,
+  )
+  recordAdminPayment(@Param('id') id: string, @Body() dto: any, @Req() req: any) {
+    return this.service.recordAdminPayment(id, dto, this.userId(req));
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Get admission application details' })
   @RequirePermissions(

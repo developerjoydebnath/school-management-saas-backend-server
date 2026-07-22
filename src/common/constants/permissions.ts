@@ -214,6 +214,20 @@ export const PERMISSIONS = {
       DELETE: 'students.delete',
     },
   },
+  PARENTS: {
+    ALL: 'parents.all',
+    DIRECTORY: {
+      ALL: 'parents.directory.all',
+      VIEW: 'parents.directory.view',
+      EDIT: 'parents.directory.update',
+      DELETE: 'parents.directory.delete',
+    },
+    PORTAL: {
+      ALL: 'parents.portal.all',
+      VIEW: 'parents.portal.view',
+      EDIT: 'parents.portal.update',
+    },
+  },
   SETTINGS: {
     VIEW: 'settings.view',
     ALL: 'settings.all',

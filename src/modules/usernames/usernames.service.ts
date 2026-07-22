@@ -105,6 +105,18 @@ export class UsernamesService implements OnModuleInit {
     return `${prefix}-${shortCode}-${String(sequence).padStart(5, '0')}`;
   }
 
+  resolveEffectiveSchemaName(schemaName?: string | null) {
+    const normalized = String(schemaName || '').trim() || 'public';
+    if (normalized !== 'public') return normalized;
+
+    return (
+      process.env.PLATFORM_TEST_TENANT_SCHEMA ||
+      process.env.DEFAULT_TENANT_SCHEMA ||
+      process.env.DEV_TENANT_SCHEMA ||
+      'tenant'
+    );
+  }
+
   async generateForSchema(
     schemaName: string,
     role: Role,
@@ -112,18 +124,32 @@ export class UsernamesService implements OnModuleInit {
   ) {
     await this.ensureRuntimeObjects();
 
+    const effectiveSchemaName = this.resolveEffectiveSchemaName(schemaName);
+    const schemaCandidates = Array.from(
+      new Set(
+        [
+          schemaName,
+          schemaName?.replace(/_/g, '-'),
+          effectiveSchemaName,
+          effectiveSchemaName.replace(/_/g, '-'),
+        ]
+          .map((value) => String(value || '').trim())
+          .filter((value) => value && value !== 'public'),
+      ),
+    );
+
     let school = await client.school.findFirst({
       where: {
         deletedAt: null,
-        OR: [
-          { schoolSlug: schemaName },
-          { schoolSlug: schemaName.replace(/_/g, '-') },
-        ],
+        OR: schemaCandidates.map((schoolSlug) => ({ schoolSlug })),
       },
       select: { id: true },
     });
 
-    if (!school && ['tenant', 'tenant_template'].includes(schemaName)) {
+    if (
+      !school &&
+      ['public', 'tenant', 'tenant_template'].includes(schemaName)
+    ) {
       school = await client.school.findFirst({
         where: { deletedAt: null },
         orderBy: { createdAt: 'asc' },

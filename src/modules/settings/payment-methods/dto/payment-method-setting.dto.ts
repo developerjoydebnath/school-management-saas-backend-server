@@ -50,6 +50,14 @@ export class CreatePaymentMethodSettingDto {
   isDefault?: boolean;
 
   @IsOptional()
+  @IsBoolean()
+  adminEnabled?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  publicEnabled?: boolean;
+
+  @IsOptional()
   @IsInt()
   @Min(0)
   sortOrder?: number;
@@ -78,4 +86,14 @@ export class UpdatePaymentMethodStatusDto {
   @IsString()
   @IsIn(PAYMENT_METHOD_STATUSES)
   status: string;
+}
+
+export class UpdatePaymentMethodAvailabilityDto {
+  @IsOptional()
+  @IsBoolean()
+  adminEnabled?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  publicEnabled?: boolean;
 }

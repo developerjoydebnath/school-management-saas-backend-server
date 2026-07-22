@@ -2397,6 +2397,8 @@ model PaymentMethodSetting {
   description String? @db.Text
   mode String @default("sandbox") @db.VarChar(20)
   status String @default("INACTIVE") @db.VarChar(20)
+  adminEnabled Boolean @default(true) @map("admin_enabled")
+  publicEnabled Boolean @default(false) @map("public_enabled")
   isDefault Boolean @default(false) @map("is_default")
   sortOrder Int @default(0) @map("sort_order")
   currency String @default("BDT") @db.VarChar(10)

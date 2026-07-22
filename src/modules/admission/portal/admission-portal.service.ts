@@ -489,7 +489,7 @@ export class AdmissionPortalService {
         select: { id: true, districtId: true, enName: true, bnName: true },
         orderBy: [{ enName: 'asc' }],
       }),
-      this.paymentMethodSettingsService.activeOptions(),
+      this.paymentMethodSettingsService.activeOptions('public'),
     ]);
     const paymentMethods = Array.isArray(paymentMethodResponse?.data)
       ? paymentMethodResponse.data
@@ -640,7 +640,7 @@ export class AdmissionPortalService {
       undefined,
       typeof application.specialQuota === 'string' ? application.specialQuota : undefined,
     );
-    const paymentMethodsResponse = await this.paymentMethodSettingsService.activeOptions();
+    const paymentMethodsResponse = await this.paymentMethodSettingsService.activeOptions('public');
     const paymentMethods = Array.isArray(paymentMethodsResponse?.data)
       ? paymentMethodsResponse.data
       : [];
@@ -767,6 +767,7 @@ export class AdmissionPortalService {
   ) {
     const method = await this.paymentMethodSettingsService.findActiveByProvider(
       'sslcommerz',
+      'public',
     );
     const credentials = method.credentialData || {};
     const storeId = String(credentials.storeId || credentials.store_id || '').trim();
@@ -906,6 +907,7 @@ export class AdmissionPortalService {
 
     const method = await this.paymentMethodSettingsService.findActiveByProvider(
       'sslcommerz',
+      'public',
     );
     const credentials = method.credentialData || {};
     const storeId = String(credentials.storeId || credentials.store_id || '').trim();

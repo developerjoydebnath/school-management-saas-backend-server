@@ -94,12 +94,39 @@ export class StudentsService {
     return email;
   }
 
+  private resolveSessionFilter(query: any = {}) {
+    if (query.sessionId !== undefined && query.sessionId !== null) {
+      const explicitSessions = String(query.sessionId)
+        .split(',')
+        .map((value) => value.trim())
+        .filter((value) => value && value !== 'all');
+
+      if (explicitSessions.length > 1) {
+        return { in: explicitSessions };
+      }
+
+      if (explicitSessions.length === 1) {
+        return explicitSessions[0];
+      }
+
+      return undefined;
+    }
+
+    return this.tenantConnection.getAcademicSessionId?.() || undefined;
+  }
+
   private async syncStudentProfileEmail(student: any, email: string | null) {
     if (!student?.userId) return;
-    await this.prismaService.client.userProfile.updateMany({
-      where: { userId: student.userId },
-      data: { email },
-    });
+    await this.prismaService.client.$transaction([
+      this.prismaService.client.user.updateMany({
+        where: { id: student.userId },
+        data: { email },
+      }),
+      this.prismaService.client.userProfile.updateMany({
+        where: { userId: student.userId },
+        data: { email },
+      }),
+    ]);
   }
 
   private buildWhere(query: any = {}) {
@@ -112,7 +139,8 @@ export class StudentsService {
         { fatherMobile: { contains: query.search, mode: 'insensitive' } },
       ];
     }
-    if (query.sessionId) where.currentSessionId = query.sessionId;
+    const sessionFilter = this.resolveSessionFilter(query);
+    if (sessionFilter) where.currentSessionId = sessionFilter;
     if (query.classId) where.classId = query.classId;
     if (query.sectionId) where.sectionId = query.sectionId;
     if (query.gender) {
@@ -169,8 +197,11 @@ export class StudentsService {
     const prisma = this.prisma();
     const where = this.buildWhere(query);
     delete where.classId;
+    const sessionFilter = this.resolveSessionFilter(query);
     const sessionId =
-      query.sessionId || this.tenantConnection.getAcademicSessionId?.() || null;
+      typeof sessionFilter === 'string'
+        ? sessionFilter
+        : this.tenantConnection.getAcademicSessionId?.() || null;
     const [classes, groupedCounts] = await Promise.all([
       prisma.class.findMany({
         where: { deletedAt: null, status: 'ACTIVE' },

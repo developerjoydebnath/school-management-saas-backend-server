@@ -18,6 +18,7 @@ import { PermissionsGuard } from 'src/modules/auth/guards/permissions.guard';
 import { RolesGuard } from 'src/modules/auth/guards/roles.guard';
 import {
   CreatePaymentMethodSettingDto,
+  UpdatePaymentMethodAvailabilityDto,
   UpdatePaymentMethodSettingDto,
   UpdatePaymentMethodStatusDto,
 } from './dto/payment-method-setting.dto';
@@ -51,8 +52,8 @@ export class PaymentMethodSettingsController {
     PERMISSIONS.SETTINGS.PAYMENT_METHODS.ALL,
     PERMISSIONS.SETTINGS.ALL,
   )
-  activeOptions() {
-    return this.service.activeOptions();
+  activeOptions(@Query('usage') usage?: string, @Query('context') context?: string) {
+    return this.service.activeOptions((usage || context) as any);
   }
 
   @Get()
@@ -116,6 +117,21 @@ export class PaymentMethodSettingsController {
     @Req() req: any,
   ) {
     return this.service.updateStatus(id, dto.status, this.userId(req));
+  }
+
+  @Patch(':id/availability')
+  @ApiOperation({ summary: 'Update configured payment method usage availability' })
+  @RequirePermissions(
+    PERMISSIONS.SETTINGS.PAYMENT_METHODS.EDIT,
+    PERMISSIONS.SETTINGS.PAYMENT_METHODS.ALL,
+    PERMISSIONS.SETTINGS.ALL,
+  )
+  updateAvailability(
+    @Param('id') id: string,
+    @Body() dto: UpdatePaymentMethodAvailabilityDto,
+    @Req() req: any,
+  ) {
+    return this.service.updateAvailability(id, dto, this.userId(req));
   }
 
   @Delete(':id')
